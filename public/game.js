@@ -7,6 +7,8 @@ const menu = document.getElementById('menu');
 const nameInput = document.getElementById('name');
 
 const COLORS = { red: '#ff4d5e', blue: '#4d9dff' };
+const BOT_GREEN = '#39ff14'; // verde fluor para los nombres de bots
+let notices = []; // avisos para el creador de la partida
 const TEAM_HEX = { red: 0xe23b4c, blue: 0x2f7fe6 };
 const P_R = MAP.P_R;
 const SPEED = MAP.SPEED;
@@ -170,7 +172,7 @@ function openModal(el) {
   el.classList.add('open');
   if (el === shop) renderShop(true);
 }
-document.getElementById('botsBtn').onclick = () => openModal(botsPanel);
+document.getElementById('botsBtn').onclick = () => { syncMatchPanel(); openModal(botsPanel); };
 
 // Salir al menu principal
 const exitAsk = document.getElementById('exitAsk');
@@ -216,6 +218,17 @@ botsPanel.querySelectorAll('.add').forEach((b) => {
   b.onclick = () => socket.emit('addBots', { count: +b.dataset.n, team: botTeam });
 });
 document.getElementById('botClear').onclick = () => socket.emit('clearBots');
+// Completar equipos con bots (lo puede prender/apagar cualquiera; los avisos le llegan al creador)
+const autoFillBox = document.getElementById('autoFill');
+autoFillBox.onchange = () => socket.emit('autoFill', { on: autoFillBox.checked });
+function syncMatchPanel() {
+  if (!state || !state.m) return;
+  if (document.activeElement !== autoFillBox) autoFillBox.checked = !!state.m.af;
+  const cr = state.p.find((p) => p.id === state.m.cr);
+  document.getElementById('creatorInfo').textContent =
+    state.m.cr === myId ? '👑 Sos el creador: te avisamos cuando se agregan o quitan bots.'
+      : cr ? `👑 Creador de la partida: ${cr.n}` : '';
+}
 
 // Nueva partida
 const MODE_INFO = {
@@ -343,6 +356,7 @@ socket.on('state', (s) => {
   const mine = s.p.find((p) => p.id === myId);
   if (mine) reconcile(mine, s);
   renderShop(false);
+  if (botsPanel.classList.contains('open')) syncMatchPanel();
   if (!myId && performance.now() - lobbyAt > 500) { lobbyAt = performance.now(); refreshLobby(); }
 });
 socket.on('hit', (d) => {
@@ -350,6 +364,10 @@ socket.on('hit', (d) => {
   hitMark = { at: now, head: !!d.h, kill: !!d.k };
   if (d.h) popups.push({ at: now, text: `¡HEADSHOT! +$${MAP.HEADSHOT_COINS}`, color: '#ff5a5a', big: true });
   else if (d.k) popups.push({ at: now, text: `Baja +$${MAP.KILL_COINS}`, color: '#f2c94c' });
+});
+socket.on('notice', (msg) => {
+  notices.push({ msg, at: performance.now() });
+  if (notices.length > 3) notices.shift();
 });
 socket.on('feed', (msg) => {
   feed.push({ msg, at: performance.now() });
@@ -725,19 +743,20 @@ function makeLabel() {
   sprite.position.y = 104;
   return { c, tex, sprite, key: '' };
 }
-function drawLabel(l, name, hp, team) {
-  const key = name + '|' + hp;
+function drawLabel(l, name, hp, team, isBot) {
+  const key = name + '|' + hp + '|' + isBot;
   if (l.key === key) return;
   l.key = key;
   const g = l.c.getContext('2d');
   g.clearRect(0, 0, 256, 72);
-  g.font = 'bold 30px system-ui, sans-serif';
+  // los bots llevan el nombre mas grande y en verde fluor, para reconocerlos al toque
+  g.font = isBot ? 'bold 40px system-ui, sans-serif' : 'bold 30px system-ui, sans-serif';
   g.textAlign = 'center';
-  g.lineWidth = 6;
-  g.strokeStyle = 'rgba(0,0,0,0.7)';
-  g.strokeText(name, 128, 32);
-  g.fillStyle = COLORS[team];
-  g.fillText(name, 128, 32);
+  g.lineWidth = isBot ? 7 : 6;
+  g.strokeStyle = 'rgba(0,0,0,0.8)';
+  g.strokeText(name, 128, 34);
+  g.fillStyle = isBot ? BOT_GREEN : COLORS[team];
+  g.fillText(name, 128, 34);
   g.fillStyle = 'rgba(0,0,0,0.7)';
   g.fillRect(48, 46, 160, 16);
   g.fillStyle = hp > 50 ? '#5ee07a' : hp > 25 ? '#f2c94c' : '#ff5a5a';
@@ -1082,7 +1101,8 @@ function update3D(now, meP, dt) {
     const hit = now - d.hitAt < 110;
     a.teamMat.emissive.setHex(hit ? 0xffffff : 0x000000);
     a.teamMat.opacity = p.sp ? 0.45 + 0.25 * Math.sin(now / 80) : 1;
-    drawLabel(a.label, p.n, p.hp, p.t);
+    drawLabel(a.label, p.n, p.hp, p.t, p.bt);
+    a.label.sprite.scale.set(p.bt ? 76 : 64, p.bt ? 21 : 18, 1);
   }
 
   // Balas (extrapoladas)
@@ -1202,6 +1222,34 @@ function drawPopups(now) {
   }
 }
 
+// Texto con los nombres de bots ("Bot 12") resaltados: mas grandes y en verde fluor
+const BOT_NAME_RE = /(Bot \d+)/;
+function richParts(text) {
+  return String(text).split(BOT_NAME_RE).filter(Boolean).map((s) => ({ s, bot: BOT_NAME_RE.test(s) && /^Bot \d+$/.test(s) }));
+}
+function richWidth(text, size, botSize) {
+  let w = 0;
+  for (const p of richParts(text)) {
+    ctx.font = p.bot ? `900 ${botSize}px system-ui, sans-serif` : `${size}px system-ui, sans-serif`;
+    w += ctx.measureText(p.s).width;
+  }
+  return w;
+}
+function drawRich(text, x, y, size, botSize) {
+  ctx.textAlign = 'left';
+  for (const p of richParts(text)) {
+    ctx.font = p.bot ? `900 ${botSize}px system-ui, sans-serif` : `${size}px system-ui, sans-serif`;
+    if (p.bot) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.strokeText(p.s, x, y);
+    }
+    ctx.fillStyle = p.bot ? BOT_GREEN : '#fff';
+    ctx.fillText(p.s, x, y);
+    x += ctx.measureText(p.s).width;
+  }
+}
+
 function fmtTime(ms) {
   const t = Math.ceil(ms / 1000);
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
@@ -1236,18 +1284,36 @@ function drawHUD(now, meP) {
     ctx.fillText(`${vivos.blue} vivos`, cx + 75, 49);
   }
 
-  // Feed
-  ctx.textAlign = 'right';
-  ctx.font = '14px system-ui, sans-serif';
+  // Feed (los nombres de bots en verde fluor)
   let fy = 26;
   feed = feed.filter((f) => now - f.at < 5000);
   for (const f of feed) {
+    const tw = richWidth(f.msg, 14, 15);
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    const tw = ctx.measureText(f.msg).width;
     ctx.fillRect(W - tw - 22, fy - 15, tw + 12, 21);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(f.msg, W - 16, fy);
+    drawRich(f.msg, W - 16 - tw, fy, 14, 15);
     fy += 24;
+  }
+
+  // Avisos para el creador de la partida (bots agregados/quitados)
+  notices = notices.filter((n) => now - n.at < 6000);
+  let ny = 96;
+  for (const n of notices) {
+    const t = (now - n.at) / 6000;
+    ctx.globalAlpha = t > 0.85 ? (1 - t) / 0.15 : 1;
+    const size = 15, botSize = 21;
+    const tw = Math.min(richWidth(n.msg, size, botSize), W - 40);
+    ctx.fillStyle = 'rgba(10,14,20,0.85)';
+    ctx.strokeStyle = BOT_GREEN;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(W / 2 - tw / 2 - 12, ny - 22, tw + 24, 32, 10);
+    else ctx.rect(W / 2 - tw / 2 - 12, ny - 22, tw + 24, 32);
+    ctx.fill();
+    ctx.stroke();
+    drawRich(n.msg, W / 2 - tw / 2, ny, size, botSize);
+    ctx.globalAlpha = 1;
+    ny += 40;
   }
 
   if (meP) {

@@ -39,6 +39,8 @@ const GR = MAP.GRENADE;
 //       'elim' = sin reaparicion, cada ronda la gana el equipo que elimina a todos;
 //                al terminar el tiempo gana el que gano mas rondas
 const match = {
+  creator: null, // id de quien creo la partida (recibe los avisos de bots)
+  autoFill: true, // completar equipos con bots automaticamente
   mode: 'tdm',
   minutes: 5,
   endsAt: 0,
@@ -143,7 +145,8 @@ function placeNewPlayer(p) {
 }
 
 // ---- Partida: inicio, rondas y final ----
-function startMatch(mode, minutes) {
+function startMatch(mode, minutes, creatorId) {
+  if (creatorId) match.creator = creatorId;
   const now = Date.now();
   match.mode = mode === 'elim' ? 'elim' : 'tdm';
   match.minutes = clamp(Math.round(Number(minutes) || 5), 1, MAP.MAX_MINUTES);
@@ -343,18 +346,70 @@ function botCount() {
   return n;
 }
 
-function addBot(team) {
-  if (botCount() >= MAX_BOTS) return false;
+// auto = bot agregado solo para emparejar equipos (se va si entra una persona)
+function addBot(team, auto) {
+  if (botCount() >= MAX_BOTS) return null;
   if (team !== 'red' && team !== 'blue') {
     const c = teamCounts();
     team = c.red <= c.blue ? 'red' : 'blue';
   }
   const id = 'bot-' + ++botSeq;
   const p = newPlayer(id, 'Bot ' + botSeq, team, true, Math.random() < 0.5 ? 0 : 1);
+  p.autoBot = !!auto;
   p.bot = { reactAt: 0, strafe: 1, strafeAt: 0, lastX: 0, lastY: 0, checkAt: 0, wanderUntil: 0, wanderA: 0 };
   placeNewPlayer(p);
   players[id] = p;
-  return true;
+  return p;
+}
+
+// ---- Creador de la partida y equipos parejos ----
+// El creador es quien arranco la partida; si se va, pasa a ser el jugador que siga.
+function ensureCreator() {
+  const c = players[match.creator];
+  if (c && !c.isBot) return;
+  match.creator = null;
+  for (const id in players) if (!players[id].isBot) { match.creator = id; break; }
+}
+
+function notifyCreator(msg) {
+  ensureCreator();
+  if (match.creator) io.to(match.creator).emit('notice', msg);
+}
+
+// Si un equipo tiene menos jugadores, se agregan bots ahi; si sobran bots automaticos, se sacan.
+function balanceTeams() {
+  if (!match.autoFill || humanCount() === 0) return;
+  const notes = [];
+  for (let guard = 0; guard < MAX_BOTS + 2; guard++) {
+    const c = teamCounts();
+    const diff = c.red - c.blue;
+    if (diff === 0) break;
+    const big = diff > 0 ? 'red' : 'blue';
+    const small = diff > 0 ? 'blue' : 'red';
+    // primero se saca un bot automatico del equipo que tiene de mas (mejor si esta muerto)
+    const extra = Object.values(players)
+      .filter((p) => p.autoBot && p.team === big)
+      .sort((a, b) => (a.alive ? 1 : 0) - (b.alive ? 1 : 0))[0];
+    if (extra) {
+      delete players[extra.id];
+      notes.push(`Se quitó ${extra.name} del ${teamName(big)}`);
+      continue;
+    }
+    const bot = addBot(small, true);
+    if (!bot) break; // se llego al maximo de bots
+    notes.push(`Se agregó ${bot.name} al ${teamName(small)} para emparejar`);
+  }
+  if (notes.length) {
+    const c = teamCounts();
+    notifyCreator(`🤖 ${notes.join(' · ')} (${c.red} vs ${c.blue})`);
+    checkElimination(Date.now());
+  }
+}
+
+function removeAutoBots() {
+  const names = [];
+  for (const id in players) if (players[id].autoBot) { names.push(players[id].name); delete players[id]; }
+  return names;
 }
 
 function removeBots() {
@@ -456,6 +511,7 @@ io.on('connection', (socket) => {
     for (let i = 0; i < count; i++) if (addBot(data.team)) added++;
     if (added) io.emit('feed', `${players[socket.id].name} agregó ${added} bot${added > 1 ? 's' : ''}`);
     else socket.emit('feed', `Máximo ${MAX_BOTS} bots`);
+    balanceTeams();
   });
 
   socket.on('clearBots', () => {
@@ -463,15 +519,33 @@ io.on('connection', (socket) => {
     const n = removeBots();
     if (n) io.emit('feed', `Se quitaron ${n} bots`);
     checkElimination(Date.now());
+    balanceTeams();
+  });
+
+  // Prender/apagar el autocompletado de equipos con bots
+  socket.on('autoFill', (data) => {
+    const p = players[socket.id];
+    if (!p) return;
+    match.autoFill = !!(data && data.on);
+    if (match.autoFill) {
+      io.emit('feed', `${p.name} activó completar equipos con bots`);
+      balanceTeams();
+    } else {
+      const gone = removeAutoBots();
+      io.emit('feed', `${p.name} desactivó completar equipos con bots`);
+      if (gone.length) notifyCreator(`🤖 Se quitaron los bots automáticos: ${gone.join(', ')}`);
+      checkElimination(Date.now());
+    }
   });
 
   socket.on('newMatch', (data) => {
     const p = players[socket.id];
     if (!p) return;
     data = data || {};
-    startMatch(data.mode, data.minutes);
+    startMatch(data.mode, data.minutes, socket.id);
     const modo = match.mode === 'elim' ? 'Guerra' : 'DeathMatch';
     io.emit('feed', `${p.name} empezó una partida: ${modo}, ${match.minutes} min`);
+    balanceTeams();
   });
 
   socket.on('buyGrenade', () => {
@@ -510,10 +584,12 @@ io.on('connection', (socket) => {
     socket.emit('welcome', { id: socket.id, team });
     io.emit('feed', `${name} entró al equipo ${teamName(team)}`);
     if (startNew && (data.mode === 'tdm' || data.mode === 'elim')) {
-      startMatch(data.mode, data.minutes);
+      startMatch(data.mode, data.minutes, socket.id);
       const modo = match.mode === 'elim' ? 'Guerra' : 'DeathMatch';
       io.emit('feed', `${name} empezó una partida: ${modo}, ${match.minutes} min`);
     }
+    ensureCreator();
+    balanceTeams();
   });
 
   socket.on('input', (inp) => {
@@ -539,6 +615,11 @@ io.on('connection', (socket) => {
     io.emit('feed', `${p.name} se fue`);
     if (humanCount() === 0) removeBots(); // sin humanos, no quedan bots jugando solos
     checkElimination(Date.now());
+    if (match.creator === socket.id) {
+      ensureCreator(); // el siguiente jugador pasa a ser el creador
+      if (match.creator) io.to(match.creator).emit('notice', '👑 Ahora sos el creador de la partida');
+    }
+    balanceTeams();
   }
   socket.on('leave', leave);
   socket.on('disconnect', leave);
@@ -726,12 +807,15 @@ function tick() {
       ban: match.banner,
       bt: match.bannerTeam,
       pl: match.phase === 'playing' ? 0 : Math.max(0, match.phaseUntil - now),
+      af: match.autoFill,
+      cr: match.creator,
     },
   });
 }
 
 startMatch('tdm', 5);
 setInterval(tick, 1000 / TICK);
+setInterval(balanceTeams, 2000); // control extra por si algo quedo desparejo
 
 const PORT = process.env.PORT || 3030;
 server.listen(PORT, () => {
