@@ -468,7 +468,8 @@ export function createWorld(scene, hemi, sun, teamHex) {
       }
       case 'floor': {
         const tile = d.tex === 'tiles' ? 40 : d.tex === 'plaza' ? 90 : 70;
-        floorPlane(g, d.x, d.y, d.w, d.h, d.tex, tile, d.tex === 'sidewalk' ? 0.6 : 0.4);
+        // pisos apilados con algo de separacion para que no parpadeen (vereda arriba del asfalto, baldosas arriba de la vereda)
+        floorPlane(g, d.x, d.y, d.w, d.h, d.tex, tile, d.tex === 'tiles' ? 1.6 : d.tex === 'sidewalk' ? 0.8 : 0.5);
         break;
       }
       case 'paint': floorPlane(g, d.x, d.y, d.w, d.h, null, 0, 0.9, d.c); break;

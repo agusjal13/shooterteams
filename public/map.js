@@ -80,22 +80,26 @@
     const walls = [{ x, y, w, h, z, k: 'building', c: color }];
     const ramps = [];
     const gap = stairs ? stairs.gap : null; // {side, from, to}
+    // La baranda arranca en el techo (zb = z): asi no se superpone con la fachada
+    // (si se superponen, las ventanas "parpadean" al moverse).
+    const add = (x0, y0, ww, hh) => walls.push({ x: x0, y: y0, w: ww, h: hh, z: PZ, zb: z, k: 'parapet', c: color });
     const edge = (side, x0, y0, ww, hh) => {
       if (gap && gap.side === side) {
         // baranda partida en dos, dejando el hueco
         if (side === 'n' || side === 's') {
-          if (gap.from > x0) walls.push({ x: x0, y: y0, w: gap.from - x0, h: hh, z: PZ, k: 'parapet', c: color });
-          if (gap.to < x0 + ww) walls.push({ x: gap.to, y: y0, w: x0 + ww - gap.to, h: hh, z: PZ, k: 'parapet', c: color });
+          if (gap.from > x0) add(x0, y0, gap.from - x0, hh);
+          if (gap.to < x0 + ww) add(gap.to, y0, x0 + ww - gap.to, hh);
         } else {
-          if (gap.from > y0) walls.push({ x: x0, y: y0, w: ww, h: gap.from - y0, z: PZ, k: 'parapet', c: color });
-          if (gap.to < y0 + hh) walls.push({ x: x0, y: gap.to, w: ww, h: y0 + hh - gap.to, z: PZ, k: 'parapet', c: color });
+          if (gap.from > y0) add(x0, y0, ww, gap.from - y0);
+          if (gap.to < y0 + hh) add(x0, gap.to, ww, y0 + hh - gap.to);
         }
-      } else walls.push({ x: x0, y: y0, w: ww, h: hh, z: PZ, k: 'parapet', c: color });
+      } else add(x0, y0, ww, hh);
     };
     edge('n', x, y, w, P);
     edge('s', x, y + h - P, w, P);
-    edge('w', x, y, P, h);
-    edge('e', x + w - P, y, P, h);
+    // los costados van entre la baranda de adelante y la de atras (sin pisarse en las esquinas)
+    edge('w', x, y + P, P, h - 2 * P);
+    edge('e', x + w - P, y + P, P, h - 2 * P);
     if (stairs) ramps.push({ ...stairs.ramp, top: z });
     return { walls, ramps };
   }
@@ -106,8 +110,10 @@
     const walls = [];
     if (open !== 'n') walls.push({ x, y, w, h: T, z: Z, k: 'shopWall', c: color });
     if (open !== 's') walls.push({ x, y: y + h - T, w, h: T, z: Z, k: 'shopWall', c: color });
-    if (open !== 'w') walls.push({ x, y, w: T, h, z: Z, k: 'shopWall', c: color });
-    if (open !== 'e') walls.push({ x: x + w - T, y, w: T, h, z: Z, k: 'shopWall', c: color });
+    // paredes de los costados entre la de adelante y la de atras (sin pisarse en las esquinas)
+    const sy0 = open !== 'n' ? y + T : y, sy1 = open !== 's' ? y + h - T : y + h;
+    if (open !== 'w') walls.push({ x, y: sy0, w: T, h: sy1 - sy0, z: Z, k: 'shopWall', c: color });
+    if (open !== 'e') walls.push({ x: x + w - T, y: sy0, w: T, h: sy1 - sy0, z: Z, k: 'shopWall', c: color });
     // mostrador cerca de la entrada
     if (open === 's') walls.push({ x: x + 40, y: y + h - 50, w: w - 80, h: 18, z: 44, k: 'counter' });
     if (open === 'n') walls.push({ x: x + 40, y: y + 32, w: w - 80, h: 18, z: 44, k: 'counter' });
