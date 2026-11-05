@@ -56,11 +56,29 @@
     p.y = clamp(p.y, R, H - R);
   }
 
+  // Armas de la tienda (las usan servidor y cliente).
+  // dmg = daño por bala, rate = ms entre disparos, pellets = balas por disparo,
+  // spread = dispersion (radianes), life = alcance en segundos de vuelo.
+  const WEAPONS = [
+    { id: 0, name: 'Básica', price: 0, dmg: 20, rate: 170, pellets: 1, spread: 0.02, life: 0.9, speed: 950,
+      desc: 'La de siempre. Equilibrada.' },
+    { id: 1, name: 'Pistola', price: 50, dmg: 28, rate: 200, pellets: 1, spread: 0.02, life: 0.9, speed: 1000,
+      desc: 'Un poco más de daño por tiro.' },
+    { id: 2, name: 'Escopeta', price: 70, dmg: 15, rate: 750, pellets: 6, spread: 0.32, life: 0.42, speed: 900,
+      desc: 'Mucho daño de cerca, lenta y de corto alcance.' },
+    { id: 3, name: 'Metralleta', price: 90, dmg: 12, rate: 75, pellets: 1, spread: 0.09, life: 0.8, speed: 1000,
+      desc: 'Dispara muy rápido, menos daño por bala.' },
+  ];
+
   const MAP = {
     W,
     H,
     walls,
     resolve,
+    WEAPONS,
+    START_COINS: 100,
+    KILL_COINS: 5,
+    MAX_MINUTES: 15,
     P_R: 22,
     SPEED: 260,
     spawns: {

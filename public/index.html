@@ -15,6 +15,8 @@
       touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none;
     }
     canvas { display: block; position: fixed; inset: 0; }
+    #gl canvas { pointer-events: none; }
+    #hud { z-index: 2; }
     .overlay {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
       background: radial-gradient(circle at 25% 50%, #4a1820 0%, transparent 55%),
@@ -45,13 +47,69 @@
     #rotate { display: none; z-index: 20; flex-direction: column; gap: 10px; font-size: 20px; }
     #rotate .icon { font-size: 54px; animation: spin 2s ease-in-out infinite; }
     @keyframes spin { 0%,30% { transform: rotate(0); } 60%,100% { transform: rotate(90deg); } }
+    /* Botones arriba a la izquierda (debajo del minimapa) */
+    #tools { position: fixed; left: 12px; top: 122px; z-index: 5; display: none; gap: 6px; flex-direction: column; align-items: flex-start; }
+    body.playing #tools { display: flex; }
+    #tools button, .sheet button {
+      font: 600 14px system-ui, sans-serif; color: #fff; border: 1px solid rgba(255,255,255,.3);
+      background: rgba(10,14,20,.7); border-radius: 10px; padding: 8px 12px; cursor: pointer;
+    }
+    #shopBtn { background: rgba(120,90,10,.85) !important; border-color: #f2c94c !important; }
+
+    /* Ventanas (ajustes y tienda) */
+    .modal {
+      position: fixed; inset: 0; z-index: 8; display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.5); padding: 10px;
+    }
+    .modal.open { display: flex; }
+    .sheet {
+      width: 100%; max-width: 640px; max-height: 100%; overflow-y: auto; touch-action: pan-y;
+      background: rgba(16,20,28,.97); border: 1px solid rgba(255,255,255,.2); border-radius: 16px; padding: 12px 14px;
+    }
+    .sheet h2 { margin: 0; font-size: 18px; flex: 1; }
+    .sheet .head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .sheet .close { padding: 6px 12px !important; }
+    .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .sheet .row { display: flex; gap: 6px; margin-bottom: 6px; }
+    .sheet .row button { flex: 1; padding: 8px 0; }
+    .sheet .lbl { font-size: 12px; opacity: .6; margin: 2px 0 4px; }
+    .sheet h3 { margin: 0 0 6px; font-size: 14px; color: #f2c94c; }
+    .sel { background: #fff !important; color: #111 !important; }
+    .bt[data-team=red].sel { background: #c7303f !important; color: #fff !important; }
+    .bt[data-team=blue].sel { background: #2e6fd1 !important; color: #fff !important; }
+    #botClear { width: 100%; background: rgba(120,30,40,.8) !important; }
+    #startMatch { width: 100%; background: #f2c94c !important; color: #111 !important; }
+    .mins { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .mins b { flex: 1; text-align: center; font-size: 20px; }
+    .mins button { width: 44px; }
+    .modeInfo { font-size: 12px; opacity: .7; margin: 0 0 8px; line-height: 1.35; }
+
+    /* Tienda */
+    .coins { font-size: 18px; font-weight: 800; color: #f2c94c; }
+    .shop { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; }
+    .wcard { border: 2px solid rgba(255,255,255,.15); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+    .wcard.eq { border-color: #5ee07a; }
+    .wcard .nm { font-weight: 800; font-size: 15px; }
+    .wcard .pr { color: #f2c94c; font-weight: 700; }
+    .wcard .ds { font-size: 11px; opacity: .7; min-height: 28px; }
+    .stat { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .stat span { width: 52px; opacity: .7; }
+    .stat i { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,.12); position: relative; overflow: hidden; }
+    .stat i::after { content: ''; position: absolute; inset: 0; width: var(--v); background: #f2c94c; }
+    .wcard button { margin-top: 4px; padding: 8px 0 !important; }
+    .wcard button.buy { background: #f2c94c !important; color: #111 !important; }
+    .wcard button.eqb { background: #2b7a45 !important; }
+    .wcard button:disabled { opacity: .45; }
+    input.sens { width: 100%; padding: 0; accent-color: #f2c94c; height: 28px; border: 0; background: transparent; }
+    .sensRow { display: block; margin: 0 0 14px; font-size: 14px; opacity: .85; }
     @media (orientation: portrait) and (pointer: coarse) {
       body.playing #rotate { display: flex; }
     }
   </style>
 </head>
 <body>
-  <canvas id="c"></canvas>
+  <div id="gl"></div>
+  <canvas id="hud"></canvas>
 
   <div class="overlay" id="menu">
     <div class="card">
@@ -63,11 +121,70 @@
         <button id="tAuto" data-team="auto" class="sel">Auto</button>
         <button id="tBlue" data-team="blue">Azul</button>
       </div>
+      <label class="sensRow">Sensibilidad de giro: <b class="sensVal">5</b>
+        <input type="range" class="sens" min="1" max="10" step="1" value="5">
+      </label>
       <button id="play">JUGAR</button>
       <div class="hint">
-        Celular: analógico a la izquierda para moverte y apuntar, botón a la derecha para disparar.<br>
-        PC: WASD para moverte, mouse para apuntar, click o espacio para disparar.
+        Celular: analógico izquierdo para moverte (también de costado).
+        Botón rojo para disparar: arrastralo para apuntar mientras disparás.
+        También podés arrastrar en la mitad derecha para girar la vista.<br>
+        PC: WASD para moverte, mouse para mirar (click para capturarlo), click o espacio para disparar.
       </div>
+    </div>
+  </div>
+
+  <div id="tools">
+    <button id="shopBtn">🛒 Tienda · <span id="coinsBtn">$100</span></button>
+    <button id="botsBtn">⚙️ Partida y bots</button>
+  </div>
+
+  <div class="modal" id="botsPanel">
+    <div class="sheet">
+      <div class="head"><h2>Partida y bots</h2><button class="close" data-close>✕</button></div>
+      <div class="cols">
+        <div>
+          <h3>Nueva partida</h3>
+          <div class="row">
+            <button class="mode sel" data-mode="tdm">Reaparición</button>
+            <button class="mode" data-mode="elim">Eliminación</button>
+          </div>
+          <p class="modeInfo" id="modeInfo"></p>
+          <div class="lbl">Minutos (máx. 15)</div>
+          <div class="mins">
+            <button id="minLess">−</button><b id="minVal">5</b><button id="minMore">+</button>
+          </div>
+          <button id="startMatch">Empezar partida nueva</button>
+          <p class="modeInfo" style="margin-top:6px">Reinicia puntos, monedas y armas de todos.</p>
+        </div>
+        <div>
+          <h3>Bots</h3>
+          <div class="lbl">Equipo de los bots</div>
+          <div class="row">
+            <button class="bt" data-team="red">Rojo</button>
+            <button class="bt sel" data-team="auto">Auto</button>
+            <button class="bt" data-team="blue">Azul</button>
+          </div>
+          <div class="lbl">Agregar</div>
+          <div class="row">
+            <button class="add" data-n="1">+1</button>
+            <button class="add" data-n="2">+2</button>
+            <button class="add" data-n="3">+3</button>
+          </div>
+          <button id="botClear">Quitar todos los bots</button>
+          <h3 style="margin-top:12px">Controles</h3>
+          <div class="lbl">Sensibilidad de giro: <b class="sensVal">5</b></div>
+          <input type="range" class="sens" min="1" max="10" step="1" value="5">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="shop">
+    <div class="sheet">
+      <div class="head"><h2>Tienda</h2><span class="coins" id="coinsShop">$100</span><button class="close" data-close>✕</button></div>
+      <div class="shop" id="shopList"></div>
+      <p class="modeInfo" style="margin-top:8px">Cada baja suma $5. Las armas compradas se quedan hasta que empiece otra partida.</p>
     </div>
   </div>
 
@@ -78,6 +195,6 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="map.js"></script>
-  <script src="game.js"></script>
+  <script type="module" src="game.js"></script>
 </body>
 </html>
