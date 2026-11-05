@@ -384,7 +384,13 @@ setInterval(() => {
 }, 1000 / 30);
 
 // ---------- Escena 3D ----------
-const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: 'high-performance' });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: 'high-performance' });
+} catch (e) {
+  window.showErr('Este navegador no soporta gráficos 3D (WebGL 2). Probá con Chrome actualizado. Detalle: ' + e.message);
+  throw e;
+}
 document.getElementById('gl').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const SKY = 0x5f7fa8;
@@ -985,3 +991,4 @@ function frame() {
   drawControls();
 }
 requestAnimationFrame(frame);
+window.__gameReady = true;

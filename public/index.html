@@ -193,6 +193,23 @@
     <div>Girá el celular</div>
   </div>
 
+  <div id="errBox" style="display:none;position:fixed;left:8px;right:8px;bottom:8px;z-index:50;background:#5a1620;color:#fff;
+    padding:10px 12px;border-radius:10px;font:13px system-ui,sans-serif;white-space:pre-wrap;max-height:40vh;overflow:auto"></div>
+  <script>
+    // Si algo falla, mostrarlo en pantalla (sirve para saber que pasa en el celular)
+    window.showErr = function (msg) {
+      var b = document.getElementById('errBox');
+      if (b.textContent.indexOf(msg) >= 0) return; // no repetir el mismo error
+      b.style.display = 'block';
+      b.textContent += (b.textContent ? '\n' : '') + '⚠️ ' + msg;
+    };
+    addEventListener('error', function (e) { showErr((e.message || 'Error') + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : '')); });
+    addEventListener('unhandledrejection', function (e) { showErr(String(e.reason && e.reason.message || e.reason)); });
+    // Si el juego no termino de cargar en 6 segundos, avisar
+    setTimeout(function () {
+      if (!window.__gameReady) showErr('El juego no terminó de cargar. Probá actualizar el navegador (Chrome o Safari) y recargar la página.');
+    }, 6000);
+  </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="map.js"></script>
   <script type="module" src="game.js"></script>

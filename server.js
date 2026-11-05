@@ -8,8 +8,10 @@ const MAP = require('./public/map.js');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three', 'build')));
+// no-cache: el navegador siempre pregunta si hay una version nueva (evita quedarse con archivos viejos)
+const noCache = { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') };
+app.use(express.static(path.join(__dirname, 'public'), noCache));
+app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three', 'build'), noCache));
 
 // ---- Reglas del juego ----
 const TICK = 30;
