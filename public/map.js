@@ -27,6 +27,8 @@
     walls.push(w);
     walls.push({ x: W - w.x - w.w, y: w.y, w: w.w, h: w.h });
   }
+  // Altura de cada pared (z): las cajas chicas son bajas y se puede disparar por encima.
+  for (const w of walls) w.z = w.w <= 100 && w.h <= 100 ? 70 : 130;
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -81,6 +83,13 @@
     MAX_MINUTES: 15,
     P_R: 22,
     SPEED: 260,
+    // Alturas del cuerpo (para las zonas de impacto): piernas 0-22, torso/brazos 22-67, cabeza 67-94
+    EYE_H: 62, // altura de los ojos: de aca salen las balas
+    HEAD_Z: 67,
+    TOP_Z: 94,
+    HEAD_R: 15, // radio de la cabeza
+    MAX_PITCH: 0.7, // cuanto se puede mirar arriba/abajo (radianes, ~40 grados)
+    HEADSHOT_COINS: 10,
     spawns: {
       red: { x: 60, y: 450, w: 200, h: 500 },
       blue: { x: W - 260, y: 450, w: 200, h: 500 },

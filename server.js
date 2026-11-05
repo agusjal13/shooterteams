@@ -57,6 +57,14 @@ function pointInWall(x, y) {
   return false;
 }
 
+// Igual que pointInWall pero teniendo en cuenta la altura (las balas pueden pasar por encima de cajas bajas).
+function pointInWall3(x, y, z) {
+  for (const w of MAP.walls) {
+    if (z < w.z && x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
+  }
+  return false;
+}
+
 function hitsWall(x, y, r) {
   for (const w of MAP.walls) {
     const cx = clamp(x, w.x, w.x + w.w);
@@ -88,6 +96,7 @@ function spawn(p) {
   p.alive = true;
   p.a = p.team === 'red' ? 0 : Math.PI;
   p.input.a = p.a;
+  p.input.p = 0;
   p.protectUntil = Date.now() + PROTECT_MS;
   if (p.isBot) botAutoBuy(p);
 }
@@ -114,7 +123,7 @@ function newPlayer(id, name, team, isBot) {
     x: 0, y: 0, a: 0, hp: 100, alive: true,
     kills: 0, deaths: 0, lastShot: 0, respawnAt: 0, protectUntil: 0,
     coins: MAP.START_COINS, owned: 1, weapon: 0, // owned = armas compradas (bits)
-    input: { mx: 0, my: 0, a: 0, shoot: false },
+    input: { mx: 0, my: 0, a: 0, p: 0, shoot: false },
   };
 }
 
@@ -321,6 +330,8 @@ function botThink(p, now) {
       }
       b.aim += angleDiff(ang, b.aim) * BOT.turn;
       p.input.a = b.aim + (Math.random() - 0.5) * BOT.aimNoise;
+      // apuntan al pecho con algo de error vertical (de vez en cuando le pegan a la cabeza)
+      p.input.p = Math.atan2(48 - MAP.EYE_H, td) + (Math.random() - 0.5) * BOT.aimNoise * 0.35;
       const cycle = (now - b.reactAt) % (BOT.burst + BOT.pause);
       p.input.shoot = now >= b.reactAt && cycle < BOT.burst;
       if (td > far) goal = ang + b.strafe * 0.5;
@@ -407,6 +418,7 @@ io.on('connection', (socket) => {
     p.input.mx = mx;
     p.input.my = my;
     if (Number.isFinite(inp.a)) p.input.a = inp.a;
+    if (Number.isFinite(inp.p)) p.input.p = clamp(inp.p, -MAP.MAX_PITCH, MAP.MAX_PITCH);
     p.input.shoot = !!inp.shoot;
     if (Number.isFinite(inp.q)) p.input.q = inp.q;
   });
@@ -421,16 +433,21 @@ io.on('connection', (socket) => {
   });
 });
 
-function kill(victim, shooter, now) {
+function kill(victim, shooter, now, head) {
   setDead(victim, match.mode === 'elim' ? Infinity : now + RESPAWN_MS);
   victim.deaths++;
   if (shooter) {
     shooter.kills++;
-    shooter.coins += MAP.KILL_COINS;
+    shooter.coins += head ? MAP.HEADSHOT_COINS : MAP.KILL_COINS;
   }
   score[victim.team === 'red' ? 'blue' : 'red']++;
-  io.emit('feed', `${shooter ? shooter.name : '???'} ✖ ${victim.name}`);
+  io.emit('feed', `${shooter ? shooter.name : '???'} ${head ? '🎯' : '✖'} ${victim.name}`);
   checkElimination(now);
+}
+
+// Aviso al tirador de que pego (para la marca en la mira)
+function notifyHit(shooter, head, killed) {
+  if (shooter && !shooter.isBot) io.to(shooter.id).emit('hit', { h: head ? 1 : 0, k: killed ? 1 : 0 });
 }
 
 function tryShoot(p, now) {
@@ -461,15 +478,18 @@ function tryShoot(p, now) {
   const bx = p.x + Math.cos(a) * (P_R + 8);
   const by = p.y + Math.sin(a) * (P_R + 8);
   if (pointInWall(bx, by)) return;
+  const pitch = clamp(p.input.p || 0, -MAP.MAX_PITCH, MAP.MAX_PITCH);
   for (let i = 0; i < wp.pellets; i++) {
     // la escopeta abre sus perdigones en abanico; las demas tienen un leve desvio
     const off = wp.pellets > 1
       ? (i / (wp.pellets - 1) - 0.5) * wp.spread + (Math.random() - 0.5) * 0.05
       : (Math.random() - 0.5) * wp.spread;
     const ba = a + off;
+    const bp = pitch + (Math.random() - 0.5) * wp.spread * 0.5; // desvio vertical
+    const hs = Math.cos(bp) * wp.speed;
     bullets.push({
-      id: ++bulletId, x: bx, y: by,
-      vx: Math.cos(ba) * wp.speed, vy: Math.sin(ba) * wp.speed,
+      id: ++bulletId, x: bx, y: by, z: MAP.EYE_H,
+      vx: Math.cos(ba) * hs, vy: Math.sin(ba) * hs, vz: Math.sin(bp) * wp.speed,
       owner: p.id, team: p.team, life: wp.life, dmg: wp.dmg,
     });
   }
@@ -529,18 +549,32 @@ function tick() {
     for (let s = 0; s < STEPS && !dead; s++) {
       b.x += (b.vx * DT) / STEPS;
       b.y += (b.vy * DT) / STEPS;
-      if (b.x < 0 || b.y < 0 || b.x > MAP.W || b.y > MAP.H || pointInWall(b.x, b.y)) {
+      b.z += (b.vz * DT) / STEPS;
+      if (b.x < 0 || b.y < 0 || b.x > MAP.W || b.y > MAP.H || b.z < 0 || pointInWall3(b.x, b.y, b.z)) {
         dead = true;
         break;
       }
       for (const id in players) {
         const q = players[id];
         if (!q.alive || q.team === b.team) continue;
-        if ((q.x - b.x) ** 2 + (q.y - b.y) ** 2 > (P_R + 4) ** 2) continue;
+        if (b.z > MAP.TOP_Z) continue; // paso por arriba
+        const d2 = (q.x - b.x) ** 2 + (q.y - b.y) ** 2;
+        const head = b.z >= MAP.HEAD_Z;
+        // la cabeza es mas angosta que el cuerpo
+        if (d2 > (head ? MAP.HEAD_R : P_R + 4) ** 2) continue;
         dead = true;
         if (now < q.protectUntil) break;
-        q.hp -= b.dmg;
-        if (q.hp <= 0) kill(q, players[b.owner], now);
+        const shooter = players[b.owner];
+        if (head) {
+          q.hp = 0; // disparo a la cabeza: muerte directa
+          kill(q, shooter, now, true);
+          notifyHit(shooter, true, true);
+        } else {
+          q.hp -= b.dmg; // torso, brazos y piernas: daño normal
+          const k = q.hp <= 0;
+          if (k) kill(q, shooter, now, false);
+          notifyHit(shooter, false, k);
+        }
         break;
       }
     }
@@ -554,7 +588,7 @@ function tick() {
     const p = players[id];
     list.push({
       id: p.id, n: p.name, t: p.team,
-      x: Math.round(p.x), y: Math.round(p.y), a: +p.a.toFixed(3),
+      x: Math.round(p.x), y: Math.round(p.y), a: +p.a.toFixed(3), pt: +(p.input.p || 0).toFixed(2),
       hp: Math.max(0, p.hp), al: p.alive, k: p.kills, d: p.deaths,
       rs: p.alive ? 0 : (p.respawnAt === Infinity ? -1 : Math.max(0, p.respawnAt - now)),
       sp: now < p.protectUntil,
@@ -566,7 +600,7 @@ function tick() {
   }
   io.volatile.emit('state', {
     p: list,
-    b: bullets.map((b) => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.team === 'red' ? 0 : 1]),
+    b: bullets.map((b) => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.team === 'red' ? 0 : 1, Math.round(b.z), Math.round(b.vz)]),
     s: score,
     m: {
       mo: match.mode,

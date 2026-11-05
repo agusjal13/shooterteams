@@ -34,6 +34,18 @@ let seq = 0;
 const hist = [];
 let lastFrame = performance.now();
 let yaw = 0; // hacia donde miro (radianes, 0 = derecha del mapa)
+let pitch = 0; // mirar arriba (+) / abajo (-)
+
+// Girar la vista con el dedo: horizontal = girar, vertical = subir/bajar la mira.
+function turnView(dx, dy) {
+  const s = lookSens();
+  yaw += dx * s;
+  pitch = Math.max(-MAP.MAX_PITCH, Math.min(MAP.MAX_PITCH, pitch - dy * s * 0.8));
+}
+
+// Marca de impacto en la mira y avisos de headshot / monedas
+let hitMark = { at: -1e9, head: false, kill: false };
+const popups = []; // textos que suben y se desvanecen
 
 const isFrozen = (s) => !!(s && s.m && s.m.ph !== 'playing');
 
@@ -205,6 +217,12 @@ socket.on('state', (s) => {
   if (mine) reconcile(mine, s);
   renderShop(false);
 });
+socket.on('hit', (d) => {
+  const now = performance.now();
+  hitMark = { at: now, head: !!d.h, kill: !!d.k };
+  if (d.h) popups.push({ at: now, text: `¡HEADSHOT! +$${MAP.HEADSHOT_COINS}`, color: '#ff5a5a', big: true });
+  else if (d.k) popups.push({ at: now, text: `Baja +$${MAP.KILL_COINS}`, color: '#f2c94c' });
+});
 socket.on('feed', (msg) => {
   feed.push({ msg, at: performance.now() });
   if (feed.length > 5) feed.shift();
@@ -212,7 +230,7 @@ socket.on('feed', (msg) => {
 
 function reconcile(mine, s) {
   if (!mine.al || !pred.ok || isFrozen(s)) {
-    if (mine.al && !pred.ok) yaw = mine.a; // al reaparecer miro hacia el enemigo
+    if (mine.al && !pred.ok) { yaw = mine.a; pitch = 0; } // al reaparecer miro hacia el enemigo
     pred.x = mine.x;
     pred.y = mine.y;
     pred.ok = mine.al && !isFrozen(s);
@@ -276,7 +294,7 @@ hud.addEventListener('touchstart', (e) => {
       fireId = t.identifier;
       touchShoot = true;
       fire.x = fire.lx = fire.sx = t.clientX;
-      fire.y = fire.sy = t.clientY;
+      fire.y = fire.ly = fire.sy = t.clientY;
     } else if (t.clientX <= W / 2 && joy.id === null) {
       joy.id = t.identifier;
       joy.ox = joy.x = t.clientX;
@@ -285,6 +303,7 @@ hud.addEventListener('touchstart', (e) => {
     } else if (t.clientX > W / 2 && look.id === null) {
       look.id = t.identifier;
       look.x = t.clientX;
+      look.y = t.clientY;
     }
   }
 }, { passive: false });
@@ -308,13 +327,15 @@ hud.addEventListener('touchmove', (e) => {
       joy.jy = dy / JOY_R;
     } else if (t.identifier === fireId) {
       // arrastrar el boton de disparo apunta mientras disparas
-      yaw += (t.clientX - fire.lx) * lookSens();
+      turnView(t.clientX - fire.lx, t.clientY - fire.ly);
       fire.lx = t.clientX;
+      fire.ly = t.clientY;
       fire.x = t.clientX;
       fire.y = t.clientY;
     } else if (t.identifier === look.id) {
-      yaw += (t.clientX - look.x) * lookSens();
+      turnView(t.clientX - look.x, t.clientY - look.y);
       look.x = t.clientX;
+      look.y = t.clientY;
     }
   }
 }, { passive: false });
@@ -342,7 +363,10 @@ hud.addEventListener('mousedown', () => {
 });
 addEventListener('mouseup', () => { mouseShoot = false; });
 addEventListener('mousemove', (e) => {
-  if (document.pointerLockElement === hud) yaw += e.movementX * LOOK_SENS_MOUSE;
+  if (document.pointerLockElement === hud) {
+    yaw += e.movementX * LOOK_SENS_MOUSE;
+    pitch = Math.max(-MAP.MAX_PITCH, Math.min(MAP.MAX_PITCH, pitch - e.movementY * LOOK_SENS_MOUSE));
+  }
 });
 
 const dead = (v) => (Math.abs(v) < 0.15 ? 0 : v);
@@ -377,7 +401,7 @@ const shooting = () => touchShoot || mouseShoot || !!keys.Space;
 setInterval(() => {
   if (!myId) return;
   const mv = currentMove();
-  const out = { mx: mv.mx, my: mv.my, a: yaw, shoot: shooting(), q: ++seq };
+  const out = { mx: mv.mx, my: mv.my, a: yaw, p: pitch, shoot: shooting(), q: ++seq };
   hist.push({ q: seq, x: pred.x, y: pred.y });
   if (hist.length > 120) hist.shift();
   socket.volatile.emit('input', out);
@@ -461,7 +485,7 @@ function addBox(x, y, w, h, height, mat) {
 MAP.walls.forEach((w, i) => {
   // cajas chicas mas bajas y color madera; el resto alterna colores
   const small = w.w <= 100 && w.h <= 100;
-  addBox(w.x, w.y, w.w, w.h, small ? 70 : WALL_H, small ? wallMats[2] : wallMats[i % 2 === 0 ? 0 : 1]);
+  addBox(w.x, w.y, w.w, w.h, w.z, small ? wallMats[2] : wallMats[i % 2 === 0 ? 0 : 1]);
 });
 // Muros del borde
 const borderMat = new THREE.MeshLambertMaterial({ color: 0x5b6475 });
@@ -652,6 +676,7 @@ function update3D(now, meP, dt) {
   const deadCam = meP && !meP.al;
   camera.position.set(cam.x, deadCam ? 18 : EYE_H, cam.y);
   camera.rotation.y = -yaw - Math.PI / 2;
+  camera.rotation.x = deadCam ? 0 : pitch;
   camera.rotation.z = deadCam ? 0.35 : 0;
 
   // Arma: retroceso y fogonazo
@@ -671,6 +696,7 @@ function update3D(now, meP, dt) {
     if (!p.al) continue;
     a.root.position.set(d.x, 0, d.y);
     a.body.rotation.y = -d.a;
+    a.gun.rotation.z = p.pt || 0; // el arma sube/baja segun hacia donde apunta
     // caminar
     const sp = Math.hypot(d.x - a.lx, d.y - a.ly);
     a.lx = d.x; a.ly = d.y;
@@ -697,11 +723,13 @@ function update3D(now, meP, dt) {
   // Balas (extrapoladas)
   const bdt = Math.min((now - stateAt) / 1000, 0.1);
   let i = 0;
-  for (const [, x, y, vx, vy, team] of state.b) {
+  for (const [, x, y, vx, vy, team, z, vz] of state.b) {
     const g = getBullet(i++);
     g.visible = true;
-    g.position.set(x + vx * bdt, BULLET_H, y + vy * bdt);
+    g.position.set(x + vx * bdt, (z ?? BULLET_H) + (vz || 0) * bdt, y + vy * bdt);
+    g.rotation.order = 'YZX';
     g.rotation.y = -Math.atan2(vy, vx);
+    g.rotation.z = Math.atan2(vz || 0, Math.hypot(vx, vy));
     g.userData.s.material = bulletMats[team];
     g.userData.t.material = tracerMats[team];
   }
@@ -754,6 +782,41 @@ function drawCrosshair(meP) {
   ctx.stroke();
   ctx.fillStyle = '#fff';
   ctx.fillRect(cx - 1, cy - 1, 2, 2);
+
+  // Marca de impacto: X blanca al pegar, roja y mas grande en la cabeza
+  const now = performance.now();
+  const since = now - hitMark.at;
+  if (since < 220) {
+    const s = hitMark.head ? 15 : hitMark.kill ? 12 : 10;
+    ctx.globalAlpha = 1 - since / 220;
+    ctx.strokeStyle = hitMark.head ? '#ff4040' : '#fff';
+    ctx.lineWidth = hitMark.head ? 3.5 : 2.5;
+    ctx.beginPath();
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      ctx.moveTo(cx + sx * (s - 6), cy + sy * (s - 6));
+      ctx.lineTo(cx + sx * s, cy + sy * s);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawPopups(now) {
+  for (let i = popups.length - 1; i >= 0; i--) {
+    const p = popups[i];
+    const t = (now - p.at) / 1200;
+    if (t >= 1) { popups.splice(i, 1); continue; }
+    ctx.globalAlpha = 1 - t * t;
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${p.big ? 26 : 18}px system-ui, sans-serif`;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    const y = H / 2 - 50 - t * 40;
+    ctx.strokeText(p.text, W / 2, y);
+    ctx.fillStyle = p.color;
+    ctx.fillText(p.text, W / 2, y);
+    ctx.globalAlpha = 1;
+  }
 }
 
 function fmtTime(ms) {
@@ -986,6 +1049,7 @@ function frame() {
   renderer.render(scene, camera);
 
   drawCrosshair(meP);
+  drawPopups(now);
   drawMinimap(meP);
   drawHUD(now, meP);
   drawControls();
