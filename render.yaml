@@ -3,5 +3,7 @@ services:
     name: rojo-vs-azul
     runtime: node
     plan: free
+    # Virginia: el servidor gratis de Render mas cercano a Argentina (menos demora)
+    region: virginia
     buildCommand: npm install
     startCommand: npm start
