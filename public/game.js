@@ -1,5 +1,5 @@
 import * as THREE from '/vendor/three/three.module.js';
-import { createWorld, minimapColor } from './world.js';
+import { createWorld, minimapColor, buildBlaster } from './world.js';
 
 const socket = io();
 const hud = document.getElementById('hud');
@@ -366,7 +366,7 @@ function renderShop(force) {
   const card = document.createElement('div');
   card.className = 'wcard' + (grs ? ' eq' : '');
   card.innerHTML = `
-    <div class="top"><span class="nm">💣 Granada</span><span class="pr">$${G.price}</span></div>
+    <div class="top"><span class="nm">${me && me.t === 'blue' ? '💦 Bombucha' : '🔥 Bomba de fuego'}</span><span class="pr">$${G.price}</span></div>
     <div class="ds">Más cerca del centro, más daño. Máx. ${G.max}.</div>
     <div class="stat"><span>Tenés</span><b>${grs} / ${G.max}</b></div>`;
   const btn = document.createElement('button');
@@ -449,6 +449,7 @@ function reconcile(mine, s) {
     pred.x = mine.x;
     pred.y = mine.y;
     pred.z = mine.z || 0;
+    pred.vz = 0;
     pred.ok = mine.al && !isFrozen(s);
     hist.length = 0;
     return;
@@ -508,6 +509,20 @@ function grenadeBtn() {
   const r = Math.max(26, fb.r * 0.5);
   return { x: fb.x - fb.r - r - 6, y: fb.y - fb.r - r + 10, r };
 }
+// Boton de saltar: a la izquierda del de disparo, abajo
+function jumpBtn() {
+  const fb = fireBtn();
+  const r = Math.max(28, fb.r * 0.58);
+  return { x: fb.x - fb.r - r - 18, y: fb.y + fb.r * 0.25, r };
+}
+// Salto: se predice al instante y se le avisa al servidor con un contador
+let jumpCount = 0;
+function doJump() {
+  const meP = state && state.p.find((p) => p.id === myId);
+  if (!meP || !meP.al || !pred.ok || isFrozen(state)) return;
+  if (MAP.jump(pred)) jumpCount++;
+}
+
 let lastThrowAt = -1e9;
 function throwGrenade() {
   const now = performance.now();
@@ -521,9 +536,13 @@ hud.addEventListener('touchstart', (e) => {
   for (const t of e.changedTouches) {
     const fb = fireBtn();
     const gb = grenadeBtn();
+    const jb = jumpBtn();
     const onFire = Math.hypot(t.clientX - fb.x, t.clientY - fb.y) < fb.r * 1.4;
     if (Math.hypot(t.clientX - gb.x, t.clientY - gb.y) < gb.r * 1.25) {
       throwGrenade();
+    } else if (Math.hypot(t.clientX - jb.x, t.clientY - jb.y) < jb.r * 1.2) {
+      doJump();
+      jumpPressedAt = performance.now();
     } else if (onFire && fireId === null) {
       fireId = t.identifier;
       touchShoot = true;
@@ -587,8 +606,11 @@ hud.addEventListener('touchcancel', touchEnd, { passive: false });
 
 // Teclado + mouse (PC)
 addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (!e.repeat && myId && document.activeElement !== nameInput) doJump(); // espacio = saltar
+  }
   keys[e.code] = true;
-  if (e.code === 'Space') e.preventDefault();
   if (e.code === 'KeyG' && myId && document.activeElement !== nameInput) throwGrenade();
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -634,12 +656,13 @@ function updateTurn(dt) {
   if (keys.ArrowRight) yaw += TURN_SPEED * dt;
 }
 
-const shooting = () => touchShoot || mouseShoot || !!keys.Space;
+const shooting = () => touchShoot || mouseShoot || !!keys.KeyF; // en PC: click o F (espacio es saltar)
+let jumpPressedAt = -1e9;
 
 setInterval(() => {
   if (!myId) return;
   const mv = currentMove();
-  const out = { mx: mv.mx, my: mv.my, a: yaw, p: pitch, shoot: shooting(), q: ++seq };
+  const out = { mx: mv.mx, my: mv.my, a: yaw, p: pitch, shoot: shooting(), q: ++seq, jc: jumpCount };
   hist.push({ q: seq, x: pred.x, y: pred.y });
   if (hist.length > 120) hist.shift();
   socket.volatile.emit('input', out);
@@ -672,38 +695,30 @@ world.build(MAP);
 
 // Arma en primera persona
 const viewGun = new THREE.Group();
-const gunMat = new THREE.MeshLambertMaterial({ color: 0x2b2f36 });
-const gunBody = new THREE.Mesh(new THREE.BoxGeometry(5, 6, 34), gunMat);
-viewGun.add(gunBody);
-const gunGrip = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 5), gunMat);
-gunGrip.position.set(0, -6, 8);
-viewGun.add(gunGrip);
+// salpicadura de agua en la punta al disparar
 const flash = new THREE.Mesh(
-  new THREE.SphereGeometry(3.5, 8, 8),
-  new THREE.MeshBasicMaterial({ color: 0xffe27a })
+  new THREE.SphereGeometry(3.5, 10, 8),
+  new THREE.MeshBasicMaterial({ color: 0xc8f2ff, transparent: true, opacity: 0.85 })
 );
 flash.position.set(0, 0, -20);
 viewGun.add(flash);
-// Aspecto de cada arma: largo, grosor y color.
-const GUN_STYLE = [
-  { len: 34, w: 5, h: 6, color: 0x2b2f36 }, // basica
-  { len: 18, w: 4.5, h: 7, color: 0x6a7280 }, // pistola
-  { len: 46, w: 8, h: 7, color: 0x6b4a2b }, // escopeta
-  { len: 30, w: 5, h: 5, color: 0x15181d, mag: true }, // metralleta
-];
-const gunMag = new THREE.Mesh(new THREE.BoxGeometry(3.5, 12, 5), gunMat);
-gunMag.position.set(0, -8, -4);
-viewGun.add(gunMag);
+// La pistola de agua que tenes en la mano (cambia segun el arma equipada)
 let viewWeapon = -1;
+let viewBlaster = null;
+function disposeTree(o) { o.traverse((c) => { if (c.geometry) c.geometry.dispose(); }); }
 function setViewWeapon(w) {
   if (w === viewWeapon) return;
   viewWeapon = w;
-  const st = GUN_STYLE[w] || GUN_STYLE[0];
-  gunBody.scale.set(st.w / 5, st.h / 6, st.len / 34);
-  gunBody.material = new THREE.MeshLambertMaterial({ color: st.color });
-  flash.position.z = -st.len / 2 - 3;
+  if (viewBlaster) { viewGun.remove(viewBlaster); disposeTree(viewBlaster); }
+  const { group, len } = buildBlaster(w);
+  const k = 0.62; // mas chica en la mano para que no tape la vista
+  group.scale.setScalar(k);
+  group.rotation.y = Math.PI / 2; // de +x (como se arma) a -z (hacia adelante de la camara)
+  group.position.set(0, -3, len * 0.3 * k);
+  viewGun.add(group);
+  viewBlaster = group;
+  flash.position.set(0, -3, (len * 0.3 - len - 2) * k);
   flash.scale.setScalar(w === 2 ? 1.8 : 1);
-  gunMag.visible = !!st.mag;
 }
 setViewWeapon(0);
 // Manga del brazo en primera persona, con el color de tu personaje
@@ -889,11 +904,13 @@ function buildCharacter(team, s) {
     add(g, new THREE.BoxGeometry(9, 22, 17), mat(0x2b2f3a), -12, 54, 0);
   }
 
-  const gunMatA = new THREE.MeshLambertMaterial({ color: 0x1d2128 });
-  mats.push(gunMatA);
-  const gun = add(g, gunGeo, gunMatA, 26, BULLET_H, 12);
-  const muzzle = add(g, new THREE.SphereGeometry(5, 8, 8), mat(0xffe27a, true), 46, BULLET_H, 12);
-  return { g, teamMat, legL, legR, gun, gunMatA, muzzle, mats };
+  // la pistola de agua va en un "soporte" que se inclina segun hacia donde apunta
+  const gun = new THREE.Group();
+  gun.position.set(10, BULLET_H, 12);
+  g.add(gun);
+  gun.add(buildBlaster(0).group);
+  const muzzle = add(g, new THREE.SphereGeometry(5, 8, 8), mat(0xc8f2ff, true), 48, BULLET_H, 12);
+  return { g, teamMat, legL, legR, gun, muzzle, mats };
 }
 
 // Fotos de los 4 personajes para el menu (se dibujan una vez con un renderizador chico)
@@ -932,7 +949,7 @@ function getAvatar(p) {
   let a = avatars[p.id];
   if (a && a.team === p.t && a.style === p.sy) return a;
   if (a) removeAvatar(p.id);
-  const { g, teamMat, legL, legR, gun, gunMatA, muzzle, mats } = buildCharacter(p.t, p.sy);
+  const { g, teamMat, legL, legR, gun, muzzle, mats } = buildCharacter(p.t, p.sy);
   const shadow = new THREE.Mesh(shadowGeo, shadowMat);
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.8;
@@ -942,7 +959,7 @@ function getAvatar(p) {
   root.add(shadow);
   root.add(label.sprite);
   scene.add(root);
-  a = avatars[p.id] = { root, body: g, teamMat, muzzle, label, legL, legR, team: p.t, style: p.sy, walk: 0, lx: 0, ly: 0, gun, gunMatA, mats, w: -1 };
+  a = avatars[p.id] = { root, body: g, teamMat, muzzle, label, legL, legR, team: p.t, style: p.sy, walk: 0, lx: 0, ly: 0, gun, mats, w: 0 };
   return a;
 }
 function removeAvatar(id) {
@@ -959,15 +976,17 @@ const SHARED_GEOS = new Set([bodyGeo, headGeo, visorGeo, gunGeo, legGeo, shadowG
 renderCharPreviews();
 
 // Balas
-const bulletGeo = new THREE.SphereGeometry(3.5, 8, 6);
+// Disparos de agua: una gota con un chorrito detras (rosada para el rojo, celeste para el azul)
+const bulletGeo = new THREE.SphereGeometry(3.6, 10, 8);
 const bulletMats = [
-  new THREE.MeshBasicMaterial({ color: 0xffb0b8 }),
-  new THREE.MeshBasicMaterial({ color: 0xb0d4ff }),
+  new THREE.MeshPhongMaterial({ color: 0xffc2d6, shininess: 120, specular: 0xffffff, transparent: true, opacity: 0.85 }),
+  new THREE.MeshPhongMaterial({ color: 0xbfeeff, shininess: 120, specular: 0xffffff, transparent: true, opacity: 0.85 }),
 ];
-const tracerGeo = new THREE.BoxGeometry(1, 1.6, 1.6);
+const tracerGeo = new THREE.CylinderGeometry(0.9, 1.9, 1, 8);
+tracerGeo.rotateZ(Math.PI / 2); // a lo largo de x
 const tracerMats = [
-  new THREE.MeshBasicMaterial({ color: 0xff5a6a, transparent: true, opacity: 0.55 }),
-  new THREE.MeshBasicMaterial({ color: 0x5aa0ff, transparent: true, opacity: 0.55 }),
+  new THREE.MeshBasicMaterial({ color: 0xff9ec0, transparent: true, opacity: 0.45 }),
+  new THREE.MeshBasicMaterial({ color: 0x8fdcff, transparent: true, opacity: 0.45 }),
 ];
 const bulletPool = [];
 function getBullet(i) {
@@ -985,41 +1004,75 @@ function getBullet(i) {
   return bulletPool[i];
 }
 
-// Granadas y explosiones
-const grenadeGeo = new THREE.SphereGeometry(6, 10, 8);
-const grenadeMat = new THREE.MeshLambertMaterial({ color: 0x3f5a2e });
-const grenadeLightMat = new THREE.MeshBasicMaterial({ color: 0xff3030 });
-const grenadePool = [];
-function getGrenade(i) {
-  if (!grenadePool[i]) {
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(grenadeGeo, grenadeMat));
-    const led = new THREE.Mesh(new THREE.SphereGeometry(2.2, 6, 6), grenadeLightMat);
-    led.position.y = 6;
-    g.add(led);
-    g.userData.led = led;
-    scene.add(g);
-    grenadePool[i] = g;
+// Granadas: el azul tira bombuchas (globos de agua) y el rojo bombas de fuego
+const grenadePools = [[], []]; // [0] fuego (rojo), [1] bombucha (azul)
+const balloonMat = new THREE.MeshPhongMaterial({ color: 0x3fa9ff, shininess: 140, specular: 0xffffff, transparent: true, opacity: 0.8 });
+const fireBombMat = new THREE.MeshPhongMaterial({ color: 0xb3261e, shininess: 60, specular: 0x553333 });
+const flameMat = new THREE.MeshBasicMaterial({ color: 0xffb020 });
+function makeGrenadeModel(kind) {
+  const g = new THREE.Group();
+  if (kind === 1) {
+    // bombucha: globo un poco alargado con el nudito arriba
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(7, 14, 12), balloonMat);
+    ball.scale.set(1, 1.15, 1);
+    g.add(ball);
+    const knot = new THREE.Mesh(new THREE.ConeGeometry(2, 3.5, 8), balloonMat);
+    knot.position.y = 9;
+    knot.rotation.x = Math.PI;
+    g.add(knot);
+    g.userData.led = null;
+  } else {
+    // bomba de fuego: bola roja con mecha y llamita que titila
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(6.5, 14, 12), fireBombMat));
+    const fuse = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 5, 6), new THREE.MeshLambertMaterial({ color: 0x3a2a20 }));
+    fuse.position.y = 8;
+    g.add(fuse);
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(2.4, 6, 8), flameMat);
+    flame.position.y = 13;
+    g.add(flame);
+    g.userData.led = flame;
   }
-  return grenadePool[i];
+  scene.add(g);
+  return g;
 }
+function getGrenade(kind, i) {
+  const pool = grenadePools[kind];
+  if (!pool[i]) pool[i] = makeGrenadeModel(kind);
+  return pool[i];
+}
+
 const blasts = []; // explosiones visibles
+const drops = []; // gotitas / chispas que salen volando
 const blastGeo = new THREE.SphereGeometry(1, 20, 14);
+const dropGeo = new THREE.SphereGeometry(2.6, 6, 5);
 let shakeUntil = 0, shakeAmt = 0;
 socket.on('boom', (b) => {
   const now = performance.now();
-  const fire = new THREE.Mesh(blastGeo, new THREE.MeshBasicMaterial({ color: 0xffa030, transparent: true, opacity: 0.9, depthWrite: false }));
+  const water = b.t === 'blue';
+  // bola central: salpicadura celeste o fuego naranja
+  const fire = new THREE.Mesh(blastGeo, new THREE.MeshBasicMaterial({
+    color: water ? 0x9fe3ff : 0xffa030, transparent: true, opacity: water ? 0.7 : 0.9, depthWrite: false,
+  }));
   fire.position.set(b.x, Math.max(10, b.z), b.y);
   scene.add(fire);
-  // anillo en el piso que muestra el alcance
+  // anillo en el piso que muestra el alcance (charco de agua o quemadura)
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.85, 1, 40),
-    new THREE.MeshBasicMaterial({ color: 0xff7020, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: water ? 0x4fc3ff : 0xff7020, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(b.x, 1.5, b.y);
   scene.add(ring);
-  blasts.push({ fire, ring, at: now });
+  blasts.push({ fire, ring, at: now, water });
+  // gotas de agua o chispas que salen volando
+  const dmat = new THREE.MeshBasicMaterial({ color: water ? 0xbfeeff : 0xffc040, transparent: true, opacity: 0.9 });
+  for (let i = 0; i < 26; i++) {
+    const m = new THREE.Mesh(dropGeo, dmat);
+    m.position.set(b.x, Math.max(10, b.z) + 5, b.y);
+    const a = Math.random() * Math.PI * 2, sp = 120 + Math.random() * 260;
+    scene.add(m);
+    drops.push({ m, vx: Math.cos(a) * sp, vy: 150 + Math.random() * 280, vz: Math.sin(a) * sp, at: now, mat: dmat });
+  }
   // sacudon de camara si estoy cerca
   const d = Math.hypot(pred.x - b.x, pred.y - b.y);
   const R = MAP.GRENADE.radius;
@@ -1037,10 +1090,27 @@ function updateBlasts(now) {
       continue;
     }
     b.fire.scale.setScalar(20 + R * 0.55 * Math.sqrt(t));
-    b.fire.material.opacity = 0.9 * (1 - t);
-    b.fire.material.color.setHex(t < 0.25 ? 0xfff0a0 : 0xff7a20);
+    b.fire.material.opacity = (b.water ? 0.7 : 0.9) * (1 - t);
+    if (!b.water) b.fire.material.color.setHex(t < 0.25 ? 0xfff0a0 : 0xff7a20);
     b.ring.scale.setScalar(R * Math.min(1, t * 2.2));
     b.ring.material.opacity = 0.6 * (1 - t);
+  }
+  // gotas/chispas con gravedad
+  const dt = 1 / 60;
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const d = drops[i];
+    const age = (now - d.at) / 900;
+    if (age >= 1 || d.m.position.y < 0) {
+      scene.remove(d.m);
+      drops.splice(i, 1);
+      if (!drops.some((o) => o.mat === d.mat)) d.mat.dispose();
+      continue;
+    }
+    d.vy -= 900 * dt;
+    d.m.position.x += d.vx * dt;
+    d.m.position.y += d.vy * dt;
+    d.m.position.z += d.vz * dt;
+    d.m.material.opacity = 0.9 * (1 - age);
   }
 }
 
@@ -1099,11 +1169,10 @@ function update3D(now, meP, dt) {
     if (a.w !== p.w) {
       // arma en la mano segun lo que compro
       a.w = p.w;
-      const st = GUN_STYLE[p.w] || GUN_STYLE[0];
-      a.gun.scale.set(st.len / 32, st.h / 6, st.w / 6);
-      a.gun.position.x = 10 + st.len / 2;
-      a.gunMatA.color.setHex(st.color);
-      a.muzzle.position.x = 14 + st.len;
+      for (const c of [...a.gun.children]) { a.gun.remove(c); disposeTree(c); }
+      const { group, len } = buildBlaster(p.w);
+      a.gun.add(group);
+      a.muzzle.position.x = 10 + len;
     }
     a.muzzle.visible = p.sf;
     const hit = now - d.hitAt < 110;
@@ -1128,15 +1197,17 @@ function update3D(now, meP, dt) {
   }
   for (; i < bulletPool.length; i++) bulletPool[i].visible = false;
 
-  // Granadas: la luz titila mas rapido cuando esta por explotar
-  let gi = 0;
-  for (const [, x, y, z, left] of state.g || []) {
-    const g = getGrenade(gi++);
+  // Granadas: bombuchas que se bambolean y bombas de fuego con la llamita titilando
+  const used = [0, 0];
+  for (const [, x, y, z, left, kind] of state.g || []) {
+    const k = kind === 1 ? 1 : 0;
+    const g = getGrenade(k, used[k]++);
     g.visible = true;
     g.position.set(x, z, y);
-    g.userData.led.visible = Math.floor(now / Math.max(60, left / 6)) % 2 === 0;
+    if (k === 1) g.rotation.z = Math.sin(now / 90) * 0.25;
+    else g.userData.led.scale.setScalar(0.7 + 0.5 * (Math.floor(now / Math.max(50, left / 6)) % 2));
   }
-  for (; gi < grenadePool.length; gi++) grenadePool[gi].visible = false;
+  for (const k of [0, 1]) for (let j = used[k]; j < grenadePools[k].length; j++) grenadePools[k][j].visible = false;
   updateBlasts(now);
 
   // Sacudon de camara por explosion cercana
@@ -1348,7 +1419,7 @@ function drawHUD(now, meP) {
       ctx.font = 'bold 13px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.textAlign = 'left';
-      ctx.fillText((MAP.WEAPONS[meP.w] || MAP.WEAPONS[0]).name + (meP.gr ? `  ·  💣 x${meP.gr}${isTouch ? '' : ' (G)'}` : ''), bx, by - 8);
+      ctx.fillText((MAP.WEAPONS[meP.w] || MAP.WEAPONS[0]).name + (meP.gr ? `  ·  ${meP.t === 'blue' ? '💦' : '🔥'} x${meP.gr}${isTouch ? '' : ' (G)'}` : ''), bx, by - 8);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#f2c94c';
       ctx.fillText('$' + meP.c, bx + bw, by - 8);
@@ -1411,7 +1482,7 @@ function drawHUD(now, meP) {
     ctx.textAlign = 'center';
     ctx.font = '14px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.fillText('Hacé click para usar el mouse  ·  Esc para soltarlo  ·  B abre la tienda', W / 2, H - 70);
+    ctx.fillText('Click: capturar mouse y disparar  ·  Espacio: saltar  ·  G: granada  ·  B: tienda  ·  Esc: soltar', W / 2, H - 70);
   }
 }
 
@@ -1435,19 +1506,39 @@ function drawControls() {
   const grs = meP ? meP.gr : 0;
   const gb = grenadeBtn();
   ctx.globalAlpha = grs ? 0.9 : 0.35;
-  ctx.fillStyle = 'rgba(60,90,50,0.75)';
+  const water = meP && meP.t === 'blue';
+  ctx.fillStyle = water ? 'rgba(40,120,200,0.75)' : 'rgba(200,80,30,0.75)';
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
   ctx.lineWidth = 2.5;
   ctx.beginPath(); ctx.arc(gb.x, gb.y, gb.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   ctx.font = `${Math.round(gb.r * 0.9)}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('💣', gb.x, gb.y + 1);
+  ctx.fillText(water ? '💦' : '🔥', gb.x, gb.y + 1); // bombucha (azul) o bomba de fuego (rojo)
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 13px system-ui, sans-serif';
   ctx.fillText('x' + grs, gb.x + gb.r * 0.75, gb.y + gb.r + 4);
   ctx.globalAlpha = 1;
+
+  // Boton de saltar
+  const jb = jumpBtn();
+  const pressed = performance.now() - jumpPressedAt < 150;
+  ctx.fillStyle = pressed ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.18)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(jb.x, jb.y, jb.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); // flecha hacia arriba
+  ctx.moveTo(jb.x, jb.y - jb.r * 0.5);
+  ctx.lineTo(jb.x + jb.r * 0.42, jb.y + jb.r * 0.05);
+  ctx.lineTo(jb.x + jb.r * 0.16, jb.y + jb.r * 0.05);
+  ctx.lineTo(jb.x + jb.r * 0.16, jb.y + jb.r * 0.45);
+  ctx.lineTo(jb.x - jb.r * 0.16, jb.y + jb.r * 0.45);
+  ctx.lineTo(jb.x - jb.r * 0.16, jb.y + jb.r * 0.05);
+  ctx.lineTo(jb.x - jb.r * 0.42, jb.y + jb.r * 0.05);
+  ctx.closePath();
+  ctx.fill();
 
   const base = fireBtn();
   ctx.fillStyle = fireId !== null ? 'rgba(255,90,90,0.35)' : 'rgba(255,90,90,0.4)';

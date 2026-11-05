@@ -394,6 +394,56 @@ function carModel(parent, w) {
   parent.add(car);
 }
 
+// ---------- Pistolas de agua ----------
+// Plastico brillante de colores, tanque transparente con agua, boquilla, empuñadura y gatillo.
+// Se arman a lo largo de +x (de 0 a len), con la empuñadura hacia abajo.
+const BLASTERS = [
+  { len: 30, r: 4.2, body: 0x3ecf6b, accent: 0xffd23f, tank: 'top', tankR: 4.6, tankL: 11, nozzles: 1 }, // Chorrito
+  { len: 22, r: 3.6, body: 0xff8a3d, accent: 0xffffff, tank: 'top', tankR: 3.4, tankL: 7, nozzles: 1 }, // Pistola de agua
+  { len: 40, r: 5.2, body: 0x8e5cf7, accent: 0xff5fa2, tank: 'top', tankR: 6.2, tankL: 17, nozzles: 2 }, // Regadera
+  { len: 38, r: 4.4, body: 0x2f9bff, accent: 0xffd23f, tank: 'drum', tankR: 7.5, nozzles: 1 }, // Hidrometralleta
+];
+const plastic = (c) => paintCache['p' + c] || (paintCache['p' + c] = new THREE.MeshPhongMaterial({ color: c, shininess: 70, specular: 0x555555 }));
+const waterMat = () => paintCache.water || (paintCache.water = new THREE.MeshPhongMaterial({
+  color: 0x7fdcff, shininess: 120, specular: 0xffffff, transparent: true, opacity: 0.6,
+}));
+
+export function buildBlaster(id) {
+  const b = BLASTERS[id] || BLASTERS[0];
+  const g = new THREE.Group();
+  const along = (mesh) => { mesh.rotation.z = Math.PI / 2; return mesh; }; // de eje Y a eje X
+  const put = (mesh, x, y, z) => { mesh.position.set(x, y, z); g.add(mesh); return mesh; };
+  const body = plastic(b.body), acc = plastic(b.accent);
+
+  // cuerpo redondeado
+  put(along(new THREE.Mesh(new THREE.CapsuleGeometry(b.r, b.len - 2 * b.r, 6, 14), body)), b.len / 2, 0, 0);
+  // franja decorativa
+  put(along(new THREE.Mesh(new THREE.CylinderGeometry(b.r + 0.4, b.r + 0.4, 2.2, 14), acc)), b.len * 0.7, 0, 0);
+  // boquilla(s) con punta de color
+  const zs = b.nozzles === 2 ? [-b.r * 0.55, b.r * 0.55] : [0];
+  for (const z of zs) {
+    put(along(new THREE.Mesh(new THREE.CylinderGeometry(b.r * 0.42, b.r * 0.55, 8, 10), body)), b.len + 3, 0, z);
+    put(along(new THREE.Mesh(new THREE.CylinderGeometry(b.r * 0.5, b.r * 0.5, 1.8, 10), acc)), b.len + 7, 0, z);
+  }
+  // tanque de agua
+  if (b.tank === 'top') {
+    put(along(new THREE.Mesh(new THREE.CapsuleGeometry(b.tankR, b.tankL, 6, 14), waterMat())), b.len * 0.42, b.r + b.tankR * 0.75, 0);
+    put(new THREE.Mesh(new THREE.CylinderGeometry(b.tankR * 0.45, b.tankR * 0.45, 2.5, 10), acc), b.len * 0.42, b.r + b.tankR * 1.75, 0);
+  } else {
+    const drum = put(new THREE.Mesh(new THREE.CylinderGeometry(b.tankR, b.tankR, 7, 18), waterMat()), b.len * 0.55, -b.r - b.tankR * 0.55, 0);
+    drum.rotation.x = Math.PI / 2;
+    const cap = put(new THREE.Mesh(new THREE.CylinderGeometry(b.tankR * 0.5, b.tankR * 0.5, 7.6, 12), acc), b.len * 0.55, -b.r - b.tankR * 0.55, 0);
+    cap.rotation.x = Math.PI / 2;
+  }
+  // empuñadura y gatillo
+  const grip = put(new THREE.Mesh(new THREE.CapsuleGeometry(b.r * 0.72, 7, 4, 10), acc), b.len * 0.2, -b.r - 5, 0);
+  grip.rotation.z = -0.28;
+  put(new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.7, 6, 12, Math.PI), acc), b.len * 0.34, -b.r - 0.4, 0).rotation.z = Math.PI;
+  // bomba de presion (la regadera)
+  if (b.nozzles === 2) put(along(new THREE.Mesh(new THREE.CylinderGeometry(b.r * 0.6, b.r * 0.6, b.len * 0.35, 12), acc)), b.len * 0.68, -b.r - 1.5, 0);
+  return { group: g, len: b.len + 8 };
+}
+
 // ---------- Baranda: pasamanos, barra del medio y parantes (se ve a traves) ----------
 function railingModel(parent, w) {
   const mat = lam('railing', { color: 0xf2c94c });

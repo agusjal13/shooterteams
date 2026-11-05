@@ -191,6 +191,11 @@
       { x: 930, y: 1060, w: 90, h: 90, z: 80, k: 'crate' },
     );
     merge(L, forklift(1000, 760, 'e'));
+    // cajas pegadas a las estanterias: saltando arriba de la caja y de ahi a la estanteria
+    L.walls.push(
+      { x: 852, y: 140, w: 70, h: 70, z: 95, k: 'crate' },
+      { x: 852, y: 1390, w: 70, h: 70, z: 95, k: 'crate' },
+    );
     // tabiques que arman los pasillos del centro
     L.walls.push(
       { x: 1110, y: 130, w: 30, h: 310, z: 170, k: 'partition' },
@@ -276,6 +281,11 @@
     merge(L, car(470, 690, true, 0xc0392b));
     merge(L, car(760, 930, true, 0x2e86de));
     merge(L, car(1060, 690, false, 0xf1c40f));
+    // contenedores de basura pegados a los edificios: saltando arriba y de ahi a la terraza
+    L.walls.push(
+      { x: 722, y: 170, w: 60, h: 90, z: 75, k: 'dumpster' },
+      { x: 722, y: 1340, w: 60, h: 90, z: 75, k: 'dumpster' },
+    );
     // canteros (cobertura baja)
     L.walls.push(
       { x: 300, y: 600, w: 90, h: 30, z: 45, k: 'planter' },
@@ -317,7 +327,8 @@
 
   // ---------- Fisica con alturas ----------
   const STEP = 22; // lo maximo que se puede subir sin escalera
-  const FALL_SPEED = 520; // velocidad de caida al bajarse de un borde
+  const GRAVITY = 1000; // para el salto y las caidas
+  const JUMP_V = 430; // velocidad del salto: llega a ~85 de alto (alcanza cajas, autos, contenedores de basura)
 
   // Altura de una escalera en un punto
   function rampH(r, x, y) {
@@ -379,8 +390,41 @@
     }
     p.x = clamp(p.x, R, MAP.W - R);
     p.y = clamp(p.y, R, MAP.H - R);
+    dt = dt || 1 / 30;
     const g = groundAt(p.x, p.y, z);
-    p.z = g >= z ? g : Math.max(g, z - FALL_SPEED * (dt || 1 / 30));
+    let vz = p.vz || 0;
+    if (vz !== 0 || z > g + 0.5) {
+      // en el aire (saltando o cayendo)
+      vz -= GRAVITY * dt;
+      let nz = z + vz * dt;
+      if (vz > 0 && headHit(p.x, p.y, nz)) { vz = 0; nz = z; } // pega la cabeza (ej. abajo del balcon)
+      const g2 = groundAt(p.x, p.y, Math.max(z, nz));
+      if (nz <= g2) { nz = g2; vz = 0; } // aterriza (en el piso, una caja, un techo...)
+      p.z = nz;
+      p.vz = vz;
+    } else {
+      p.z = g; // caminando: sube escalones y escaleras
+      p.vz = 0;
+    }
+  }
+
+  // ¿Choca la cabeza con algo si sube a altura z? (para el salto)
+  function headHit(x, y, z) {
+    const top = z + BODY_H;
+    for (const w of MAP.walls) {
+      const b = bottom(w);
+      if (b > z + STEP && b <= top && x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
+    }
+    return false;
+  }
+
+  // Salta solo si esta parado en algo
+  function jump(p) {
+    const z = p.z || 0;
+    if ((p.vz || 0) !== 0) return false;
+    if (Math.abs(z - groundAt(p.x, p.y, z)) > 1) return false;
+    p.vz = JUMP_V;
+    return true;
   }
 
   // ¿Hay algo solido en este punto? (para balas y granadas)
@@ -437,13 +481,13 @@
   // dmg = daño por bala, rate = ms entre disparos, pellets = balas por disparo,
   // spread = dispersion (radianes), life = alcance en segundos de vuelo.
   const WEAPONS = [
-    { id: 0, name: 'Básica', price: 0, dmg: 20, rate: 170, pellets: 1, spread: 0.02, life: 0.9, speed: 950,
+    { id: 0, name: 'Chorrito', price: 0, dmg: 20, rate: 170, pellets: 1, spread: 0.02, life: 0.9, speed: 950,
       desc: 'La de siempre, equilibrada.' },
-    { id: 1, name: 'Pistola', price: 50, dmg: 28, rate: 200, pellets: 1, spread: 0.02, life: 0.9, speed: 1000,
+    { id: 1, name: 'Pistola de agua', price: 50, dmg: 28, rate: 200, pellets: 1, spread: 0.02, life: 0.9, speed: 1000,
       desc: 'Más daño por tiro.' },
-    { id: 2, name: 'Escopeta', price: 70, dmg: 15, rate: 750, pellets: 6, spread: 0.32, life: 0.42, speed: 900,
+    { id: 2, name: 'Regadera', price: 70, dmg: 15, rate: 750, pellets: 6, spread: 0.32, life: 0.42, speed: 900,
       desc: 'Mucho daño de cerca, lenta.' },
-    { id: 3, name: 'Metralleta', price: 90, dmg: 12, rate: 75, pellets: 1, spread: 0.09, life: 0.8, speed: 1000,
+    { id: 3, name: 'Hidrometralleta', price: 90, dmg: 12, rate: 75, pellets: 1, spread: 0.09, life: 0.8, speed: 1000,
       desc: 'Muy rápida, menos daño.' },
   ];
 
@@ -471,6 +515,7 @@
     MAP_IDS,
     setMap,
     resolve,
+    jump,
     groundAt,
     solidAt,
     blocked,

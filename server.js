@@ -71,6 +71,7 @@ function spawn(p) {
     if (!MAP.blocked(p.x, p.y, 0, P_R)) break;
   }
   p.z = 0;
+  p.vz = 0;
   p.hp = 100;
   p.alive = true;
   p.a = p.team === 'red' ? 0 : Math.PI;
@@ -261,7 +262,7 @@ function updateGrenades(now) {
 }
 
 function explode(g, now) {
-  io.emit('boom', { x: Math.round(g.x), y: Math.round(g.y), z: Math.round(g.z) });
+  io.emit('boom', { x: Math.round(g.x), y: Math.round(g.y), z: Math.round(g.z), t: g.team });
   const thrower = players[g.owner];
   for (const id in players) {
     const q = players[id];
@@ -594,6 +595,11 @@ io.on('connection', (socket) => {
     if (Number.isFinite(inp.p)) p.input.p = clamp(inp.p, -MAP.MAX_PITCH, MAP.MAX_PITCH);
     p.input.shoot = !!inp.shoot;
     if (Number.isFinite(inp.q)) p.input.q = inp.q;
+    // salto: el cliente manda un contador; cada vez que sube es un salto nuevo
+    if (Number.isFinite(inp.jc) && inp.jc > (p.lastJc || 0)) {
+      p.lastJc = inp.jc;
+      p.input.jumpReq = true;
+    }
   });
 
   // Salir de la partida (al menu) o desconectarse: el jugador deja de estar en el juego
@@ -622,7 +628,7 @@ function kill(victim, shooter, now, head, grenade) {
     shooter.coins += head ? MAP.HEADSHOT_COINS : MAP.KILL_COINS;
   }
   score[victim.team === 'red' ? 'blue' : 'red']++;
-  io.emit('feed', `${shooter ? shooter.name : '???'} ${grenade ? '💣' : head ? '🎯' : '🔫'} ${victim.name}`);
+  io.emit('feed', `${shooter ? shooter.name : '???'} ${grenade ? (victim.team === 'red' ? '💦' : '🔥') : head ? '🎯' : '🔫'} ${victim.name}`);
   checkElimination(now);
 }
 
@@ -700,6 +706,7 @@ function tick() {
     }
     if (frozen) continue;
     if (p.isBot) botThink(p, now);
+    if (p.input.jumpReq) { MAP.jump(p); p.input.jumpReq = false; }
     const sp = p.isBot ? SPEED * BOT.speed : SPEED;
     p.x += p.input.mx * sp * DT;
     p.y += p.input.my * sp * DT;
@@ -788,7 +795,7 @@ function tick() {
     p: list,
     b: bullets.map((b) => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.team === 'red' ? 0 : 1, Math.round(b.z), Math.round(b.vz)]),
     s: score,
-    g: grenades.map((g) => [g.id, Math.round(g.x), Math.round(g.y), Math.round(g.z), Math.max(0, g.explodeAt - now)]),
+    g: grenades.map((g) => [g.id, Math.round(g.x), Math.round(g.y), Math.round(g.z), Math.max(0, g.explodeAt - now), g.team === 'red' ? 0 : 1]),
     m: {
       mo: match.mode,
       min: match.minutes,
