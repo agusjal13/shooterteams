@@ -60,6 +60,21 @@ document.querySelectorAll('.teams button').forEach((b) => {
     chosenTeam = b.dataset.team;
   };
 });
+// Menu paso a paso: 1) nombre y equipo, 2) personaje, 3) modo de juego
+let wizStep = 1;
+function showStep(n) {
+  wizStep = Math.max(1, Math.min(3, n));
+  document.querySelectorAll('.wstep').forEach((s) => { s.hidden = +s.dataset.step !== wizStep; });
+  document.querySelectorAll('.dots i').forEach((d, i) => d.classList.toggle('on', i < wizStep));
+  if (wizStep === 2) refreshChars();
+  if (wizStep === 3) refreshLobby();
+}
+document.querySelectorAll('.wstep .next').forEach((b) => { b.onclick = () => showStep(wizStep + 1); });
+document.querySelectorAll('.wstep .back').forEach((b) => { b.onclick = () => showStep(wizStep - 1); });
+nameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { nameInput.blur(); showStep(2); }
+});
+
 // Personaje: 2 estilos por equipo
 let chosenStyle = 0;
 try { chosenStyle = localStorage.getItem('rva_style') === '1' ? 1 : 0; } catch (e) {}
@@ -104,7 +119,7 @@ document.getElementById('mMinMore').onclick = () => { menuMins = Math.min(MAP.MA
 refreshMenuMode();
 
 // Muestra que se esta jugando ahora, para decidir si unirse o empezar otra
-const MODE_NAME = { tdm: 'Reaparición', elim: 'Eliminación' };
+const MODE_NAME = { tdm: 'DeathMatch', elim: 'Guerra' };
 function refreshLobby() {
   if (myId || !state) return;
   const humans = state.p.filter((p) => !p.bt);
@@ -1156,7 +1171,7 @@ function drawHUD(now, meP) {
   ctx.fillText(fmtTime(m.tl), cx, 32);
   ctx.font = '11px system-ui, sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.65)';
-  ctx.fillText(elim ? `Eliminación · Ronda ${m.rn}` : 'Reaparición · bajas', cx, 49);
+  ctx.fillText(elim ? `Guerra · Ronda ${m.rn}` : 'DeathMatch · bajas', cx, 49);
   if (elim) {
     const vivos = { red: 0, blue: 0 };
     for (const p of state.p) if (p.al) vivos[p.t]++;

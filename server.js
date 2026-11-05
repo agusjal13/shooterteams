@@ -470,7 +470,7 @@ io.on('connection', (socket) => {
     if (!p) return;
     data = data || {};
     startMatch(data.mode, data.minutes);
-    const modo = match.mode === 'elim' ? 'Eliminación' : 'Con reaparición';
+    const modo = match.mode === 'elim' ? 'Guerra' : 'DeathMatch';
     io.emit('feed', `${p.name} empezó una partida: ${modo}, ${match.minutes} min`);
   });
 
@@ -511,7 +511,7 @@ io.on('connection', (socket) => {
     io.emit('feed', `${name} entró al equipo ${teamName(team)}`);
     if (startNew && (data.mode === 'tdm' || data.mode === 'elim')) {
       startMatch(data.mode, data.minutes);
-      const modo = match.mode === 'elim' ? 'Eliminación' : 'Con reaparición';
+      const modo = match.mode === 'elim' ? 'Guerra' : 'DeathMatch';
       io.emit('feed', `${name} empezó una partida: ${modo}, ${match.minutes} min`);
     }
   });

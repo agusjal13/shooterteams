@@ -76,7 +76,7 @@
   // body = color del cuerpo, accent = color del equipamiento, hat = que lleva en la cabeza, gear = accesorio.
   const STYLES = {
     red: [
-      { name: 'Brasa', desc: 'Casco y chaleco táctico', body: 0xe23b4c, accent: 0x6e1420, skin: 0xf0c9a0, legs: 0x2a1d1f, hat: 'helmet', gear: 'vest' },
+      { name: 'Volcán', desc: 'Casco y chaleco táctico', body: 0xe23b4c, accent: 0x6e1420, skin: 0xf0c9a0, legs: 0x2a1d1f, hat: 'helmet', gear: 'vest' },
       { name: 'Fénix', desc: 'Bandana, cresta y mochila', body: 0xc92a3c, accent: 0xff9a2e, skin: 0xb07850, legs: 0x1d2128, hat: 'bandana', gear: 'backpack' },
     ],
     blue: [
