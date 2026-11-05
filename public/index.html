@@ -89,6 +89,28 @@
     .mapc b { font-size: 16px; }
     .mapc span { font-size: 11px; opacity: .75; line-height: 1.25; }
     .pmaps { display: flex; gap: 6px; margin-bottom: 6px; }
+    /* Salas */
+    .roomList { display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto; margin-bottom: 10px; touch-action: pan-y; }
+    .roomList .empty { font-size: 13px; opacity: .6; padding: 8px 2px; }
+    .roomRow { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: #1a202b; border: 1px solid #2b3445; }
+    .roomRow .ri { flex: 1; min-width: 0; font-size: 13px; line-height: 1.3; }
+    .roomRow .ri b { font-size: 14px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .roomRow button { padding: 8px 14px; border-radius: 10px; border: 0; background: #f2c94c; color: #111; font-weight: 800; cursor: pointer; }
+    .roomBtns { display: flex; gap: 8px; margin-bottom: 8px; }
+    .roomBtns button { flex: 1; padding: 12px 6px; font-size: 15px; font-weight: 800; border-radius: 12px; cursor: pointer; border: 2px solid #f2c94c; background: #2a2614; color: #fff; }
+    .codeRow { display: flex; gap: 8px; }
+    .codeRow input { flex: 1; text-transform: uppercase; letter-spacing: 4px; font-weight: 800; padding: 10px; }
+    .codeRow button { padding: 10px 14px; border-radius: 12px; border: 0; background: #3a4356; color: #fff; font-weight: 700; cursor: pointer; }
+    .roomErr { color: #ff6b6b; font-size: 13px; margin-top: 6px; min-height: 16px; }
+    .roomInfo { font-size: 13px; background: rgba(242,201,76,.12); border: 1px solid rgba(242,201,76,.35); border-radius: 8px; padding: 6px 8px; margin-bottom: 8px; }
+    .roomInfo:empty { display: none; }
+    .roomBar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; border-radius: 10px; background: rgba(255,255,255,.06); margin-bottom: 6px; font-size: 14px; }
+    .roomBar .codeBig b { font-size: 20px; letter-spacing: 3px; color: #f2c94c; }
+    .roomBar button { padding: 8px 10px !important; }
+    .tag { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: #3a4356; }
+    .crown { font-size: 11px; font-weight: 400; opacity: .7; color: #fff; }
+    .adminOnly.locked { opacity: .45; pointer-events: none; }
+    button.wide { width: 100%; margin-bottom: 8px; }
     .pmaps button { flex: 1; padding: 8px 0; }
     .wizard .char.sel, .wizard .mmode.sel { background: #2a2614 !important; color: #fff !important; }
     .wizard .char { flex-direction: column; text-align: center; padding: 10px; }
@@ -216,21 +238,38 @@
       <h1><span class="r">ROJO</span> vs <span class="b">AZUL</span></h1>
       <div class="dots"><i class="on"></i><i></i><i></i><i></i></div>
 
+      <!-- Paso 0: sala -->
+      <section class="wstep" data-step="0">
+        <div class="step">¿Dónde querés jugar?</div>
+        <div class="lbl">Salas públicas</div>
+        <div class="roomList" id="roomList"><div class="empty">Buscando salas…</div></div>
+        <div class="roomBtns">
+          <button id="createPub">➕ Crear sala pública</button>
+          <button id="createPriv">🔒 Crear sala privada</button>
+        </div>
+        <div class="codeRow">
+          <input id="codeInput" maxlength="5" placeholder="CÓDIGO" autocomplete="off">
+          <button id="codeJoin">Entrar con código</button>
+        </div>
+        <div id="roomErr" class="roomErr"></div>
+      </section>
+
       <!-- Paso 1: nombre y equipo -->
-      <section class="wstep" data-step="1">
-        <div class="step">Paso 1 de 4 · ¿Cómo te llamás y en qué equipo jugás?</div>
+      <section class="wstep" data-step="1" hidden>
+        <div class="step" data-title="¿Cómo te llamás y en qué equipo jugás?">Paso 1 de 4 · ¿Cómo te llamás y en qué equipo jugás?</div>
+        <div class="roomInfo" id="roomInfo"></div>
         <input id="name" maxlength="14" placeholder="Tu nombre" autocomplete="off">
         <div class="teams big">
           <button id="tRed" data-team="red">Rojo</button>
           <button id="tAuto" data-team="auto" class="sel">Auto</button>
           <button id="tBlue" data-team="blue">Azul</button>
         </div>
-        <div class="nav"><button class="next">Siguiente ›</button></div>
+        <div class="nav"><button class="back">‹ Salas</button><button class="next">Siguiente ›</button></div>
       </section>
 
       <!-- Paso 2: personaje -->
       <section class="wstep" data-step="2" hidden>
-        <div class="step">Paso 2 de 4 · Elegí tu personaje</div>
+        <div class="step" data-title="Elegí tu personaje">Paso 2 de 4 · Elegí tu personaje</div>
         <div class="chars" id="chars">
           <button class="char sel" data-s="0"></button>
           <button class="char" data-s="1"></button>
@@ -240,14 +279,14 @@
 
       <!-- Paso 3: mapa -->
       <section class="wstep" data-step="3" hidden>
-        <div class="step">Paso 3 de 4 · Elegí el mapa</div>
+        <div class="step" data-title="Elegí el mapa">Paso 3 de 4 · Elegí el mapa</div>
         <div class="maps" id="maps"></div>
         <div class="nav"><button class="back">‹ Atrás</button><button class="next">Siguiente ›</button></div>
       </section>
 
       <!-- Paso 4: modo de juego -->
       <section class="wstep" data-step="4" hidden>
-        <div class="step">Paso 4 de 4 · Modo de juego</div>
+        <div class="step" data-title="Modo de juego">Paso 4 de 4 · Modo de juego</div>
         <div class="mmodes">
           <button class="mmode sel" data-mode="tdm"><b>DeathMatch</b><span>Reaparecés a los 3 s. Gana el equipo con más bajas al terminar el tiempo.</span></button>
           <button class="mmode" data-mode="elim"><b>Guerra</b><span>Sin reaparecer. Gana la ronda quien elimina a todos; gana quien gane más rondas.</span></button>
@@ -283,11 +322,20 @@
   <div class="modal" id="botsPanel">
     <div class="sheet">
       <div class="head"><h2>Partida y bots</h2><button class="close" data-close>✕</button></div>
+      <!-- Sala: codigo para invitar, cambiarse de equipo -->
+      <div class="roomBar">
+        <div><span class="lbl">Sala</span> <b id="roomName"></b> <span id="roomPriv" class="tag"></span></div>
+        <div class="codeBig">Código: <b id="roomCode">-----</b></div>
+        <button id="shareRoom">🔗 Compartir link</button>
+        <button id="switchTeam">🔄 Cambiarme de equipo</button>
+      </div>
+      <p class="modeInfo" id="creatorInfo" style="margin:0 0 8px"></p>
       <div class="cols">
-        <div>
-          <h3>Nueva partida</h3>
+        <div class="adminOnly">
+          <h3>Mapa y partida <span class="crown">👑 solo el creador</span></h3>
           <div class="lbl">Mapa</div>
           <div class="pmaps" id="pmaps"></div>
+          <button id="changeMapNow" class="wide">Cambiar el mapa ya (sigue la partida)</button>
           <div class="lbl">Modo</div>
           <div class="row">
             <button class="mode sel" data-mode="tdm">DeathMatch</button>
@@ -302,7 +350,8 @@
           <p class="modeInfo" style="margin-top:6px">Reinicia puntos, monedas y armas de todos.</p>
         </div>
         <div>
-          <h3>Bots</h3>
+          <div class="adminOnly">
+          <h3>Bots <span class="crown">👑 solo el creador</span></h3>
           <div class="lbl">Equipo de los bots</div>
           <div class="row">
             <button class="bt" data-team="red">Rojo</button>
@@ -318,7 +367,7 @@
           <button id="botClear">Quitar todos los bots</button>
           <label class="toggle"><input type="checkbox" id="autoFill" checked> Completar equipos con bots</label>
           <p class="modeInfo" style="margin:2px 0 0">"Quitar todos los bots" también lo apaga, para jugar desparejos (ej. 3 vs 2).</p>
-          <p class="modeInfo" id="creatorInfo" style="margin:2px 0 0"></p>
+          </div>
           <h3 style="margin-top:12px">Controles</h3>
           <div class="lbl">Sensibilidad de giro: <b class="sensVal">5</b></div>
           <input type="range" class="sens" min="1" max="10" step="1" value="5">

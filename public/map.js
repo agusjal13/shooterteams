@@ -106,18 +106,25 @@
 
   // Almacen / tienda abierta: paredes en U, mostrador y toldo.
   function shop(x, y, w, h, open, color, awning) {
-    const T = 12, Z = 115;
+    const T = 12, Z = 114;
     const walls = [];
+    // techo (se puede caminar por debajo y subirse arriba saltando desde el cajon de frutas)
+    walls.push({ x: x - 6, y: y - 6, w: w + 12, h: h + 12, zb: Z, z: Z + 8, k: 'shopRoof', c: color });
     if (open !== 'n') walls.push({ x, y, w, h: T, z: Z, k: 'shopWall', c: color });
     if (open !== 's') walls.push({ x, y: y + h - T, w, h: T, z: Z, k: 'shopWall', c: color });
     // paredes de los costados entre la de adelante y la de atras (sin pisarse en las esquinas)
     const sy0 = open !== 'n' ? y + T : y, sy1 = open !== 's' ? y + h - T : y + h;
     if (open !== 'w') walls.push({ x, y: sy0, w: T, h: sy1 - sy0, z: Z, k: 'shopWall', c: color });
     if (open !== 'e') walls.push({ x: x + w - T, y: sy0, w: T, h: sy1 - sy0, z: Z, k: 'shopWall', c: color });
-    // mostrador cerca de la entrada
-    if (open === 's') walls.push({ x: x + 40, y: y + h - 50, w: w - 80, h: 18, z: 44, k: 'counter' });
-    if (open === 'n') walls.push({ x: x + 40, y: y + 32, w: w - 80, h: 18, z: 44, k: 'counter' });
+    // mostrador (puesto de frutas) cerca de la entrada
+    const cy = open === 's' ? y + h - 56 : y + 32;
+    if (open === 's' || open === 'n') walls.push({ x: x + 40, y: cy, w: w - 80, h: 24, z: 44, k: 'counter' });
+    // cajon de frutas afuera, al costado: sirve de escalon para saltar al techo
+    const fy = open === 's' ? y + h - 80 : y + 20;
+    walls.push({ x: x + w + 4, y: fy, w: 60, h: 60, z: 62, k: 'fruitCrate' });
     const deco = [];
+    deco.push({ t: 'fruits', x: x + 42, y: cy + 2, w: w - 84, h: 20, z: 44 });
+    deco.push({ t: 'fruits', x: x + w + 8, y: fy + 4, w: 52, h: 52, z: 62 });
     if (open === 's') deco.push({ t: 'awning', x, y: y + h, w, h: 50, z: 100, c: awning });
     if (open === 'n') deco.push({ t: 'awning', x, y: y - 50, w, h: 50, z: 100, c: awning });
     deco.push({ t: 'floor', x, y, w, h, tex: 'tiles' });

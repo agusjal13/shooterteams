@@ -272,6 +272,9 @@ function materialFor(w) {
     case 'parapet': return [lam('parapet' + c, { color: new THREE.Color(c).multiplyScalar(0.85) }), 'fit'];
     case 'shopWall': return [lam('shopWall' + c, { map: TEX.brick(), color: c }), 80];
     case 'counter': return [lam('counter', { map: TEX.planks() }), 60];
+    case 'shopRoof': return [lam('shopRoof' + c, { map: TEX.metal(), color: new THREE.Color(c).multiplyScalar(0.8) }), 60];
+    case 'fruitCrate': return [lam('crate', { map: TEX.wood() }), 'fit'];
+    case 'dumpster': return [lam('dumpster', { map: TEX.metal(), color: 0x2e7d4f }), 60];
     case 'car': return [lam('car' + c, { color: c }), 'fit'];
     case 'carTop': {
       const glass = lam('glass', { color: 0x2a3b4d });
@@ -465,10 +468,51 @@ function railingModel(parent, w) {
   }
 }
 
+const fruitGeos = {};
+const fruitGeo = (r) => fruitGeos[r] || (fruitGeos[r] = new THREE.SphereGeometry(r, 10, 8));
+
 // ---------- Construccion del mundo ----------
 export function createWorld(scene, hemi, sun, teamHex) {
   let group = null;
   let builtId = null;
+  let anims = []; // cosas que se mueven solas (la fuente)
+
+  // Fuente funcionando: chorros de agua en arco que suben y caen, y el agua que ondula
+  function addFountainWater(g, w) {
+    const cx = w.x + w.w / 2, cy = w.y + w.h / 2;
+    const top = w.z + 60; // punta del surtidor
+    const mat = new THREE.MeshPhongMaterial({ color: 0xbfeeff, transparent: true, opacity: 0.75, shininess: 120, specular: 0xffffff });
+    const geo = new THREE.SphereGeometry(2.6, 6, 5);
+    const drops = [];
+    const N = 8, PER = 7; // 8 chorros, 7 gotas por chorro
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < PER; i++) {
+        const m = new THREE.Mesh(geo, mat);
+        g.add(m);
+        drops.push({ m, ang: (j / N) * Math.PI * 2, phase: i / PER });
+      }
+    }
+    // chorro central hacia arriba
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(geo, mat);
+      g.add(m);
+      drops.push({ m, ang: null, phase: i / 6 });
+    }
+    const water = g.userData.fountainWater;
+    anims.push((now) => {
+      const T = now / 1100;
+      for (const d of drops) {
+        const t = (T + d.phase) % 1;
+        if (d.ang === null) {
+          d.m.position.set(cx, top + 34 * Math.sin(t * Math.PI), cy);
+        } else {
+          const r = 8 + t * (w.w / 2 - 22);
+          d.m.position.set(cx + Math.cos(d.ang) * r, top - 48 * t * t + 22 * t, cy + Math.sin(d.ang) * r);
+        }
+      }
+      if (water) water.position.y = w.z + 1 + Math.sin(now / 300) * 0.6;
+    });
+  }
 
   function box(g, x, y, w, d, z0, h, mat, tile) {
     const geo = new THREE.BoxGeometry(w, h, d);
@@ -523,6 +567,29 @@ export function createWorld(scene, hemi, sun, teamHex) {
         break;
       }
       case 'paint': floorPlane(g, d.x, d.y, d.w, d.h, null, 0, 0.9, d.c); break;
+      case 'fruits': {
+        // naranjas, manzanas, limones, peras y bananas apiladas
+        const kinds = [[0xff9f1c, 4.6], [0xd62828, 4.4], [0x7cb518, 4.2], [0xffe74c, 3.8], [0xc4e05a, 4.3]];
+        let k = Math.floor(d.x + d.y) % kinds.length;
+        const step = 9.5;
+        for (let yy = d.y + 5; yy < d.y + d.h - 3; yy += step) {
+          for (let xx = d.x + 5; xx < d.x + d.w - 3; xx += step) {
+            const [color, r] = kinds[k++ % kinds.length];
+            const f = new THREE.Mesh(fruitGeo(r), lam('fruit' + color, { color }));
+            f.position.set(xx + rnd(-1, 1), d.z + r, yy + rnd(-1, 1));
+            g.add(f);
+          }
+        }
+        // algunas bananas arriba
+        for (let i = 0; i < 3; i++) {
+          const b = new THREE.Mesh(new THREE.CapsuleGeometry(2, 9, 4, 8), lam('banana', { color: 0xffd93d }));
+          b.rotation.z = Math.PI / 2 + rnd(-0.3, 0.3);
+          b.rotation.y = rnd(0, Math.PI);
+          b.position.set(d.x + d.w * (0.25 + i * 0.25), d.z + 10, d.y + d.h / 2);
+          g.add(b);
+        }
+        break;
+      }
       case 'lamp': {
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 3.5, 170, 8), lam('pole', { color: 0x30343a }));
         pole.position.set(d.x, 85, d.y);
@@ -607,6 +674,7 @@ export function createWorld(scene, hemi, sun, teamHex) {
     }
     builtId = MAP.id;
     group = new THREE.Group();
+    anims = [];
     const th = THEMES[MAP.theme] || THEMES.desert;
 
     // cielo, niebla y luces del ambiente
@@ -645,12 +713,14 @@ export function createWorld(scene, hemi, sun, teamHex) {
         group.add(plants);
       }
       if (w.k === 'fountain') {
-        const water = new THREE.Mesh(new THREE.BoxGeometry(w.w - 20, 2, w.h - 20), new THREE.MeshLambertMaterial({ color: 0x4fa3d9 }));
+        const water = new THREE.Mesh(new THREE.BoxGeometry(w.w - 20, 2, w.h - 20), new THREE.MeshPhongMaterial({ color: 0x4fa3d9, shininess: 100, specular: 0xffffff }));
         water.position.set(w.x + w.w / 2, w.z + 1, w.y + w.h / 2);
         group.add(water);
         const spout = new THREE.Mesh(new THREE.CylinderGeometry(8, 12, 60, 12), lam('fountain', { map: TEX.stone() }));
         spout.position.set(w.x + w.w / 2, w.z + 30, w.y + w.h / 2);
         group.add(spout);
+        group.userData.fountainWater = water;
+        addFountainWater(group, w);
       }
     }
 
@@ -682,7 +752,12 @@ export function createWorld(scene, hemi, sun, teamHex) {
     scene.add(group);
   }
 
-  return { build };
+  // se llama en cada cuadro para animar (la fuente)
+  function update(now) {
+    for (const f of anims) f(now);
+  }
+
+  return { build, update };
 }
 
 // Colores para el minimapa

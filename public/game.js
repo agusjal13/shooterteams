@@ -63,18 +63,90 @@ document.querySelectorAll('.teams button').forEach((b) => {
     chosenTeam = b.dataset.team;
   };
 });
-// Menu paso a paso: 1) nombre y equipo, 2) personaje, 3) modo de juego
-let wizStep = 1;
-function showStep(n) {
-  wizStep = Math.max(1, Math.min(4, n));
-  document.querySelectorAll('.wstep').forEach((s) => { s.hidden = +s.dataset.step !== wizStep; });
-  document.querySelectorAll('.dots i').forEach((d, i) => d.classList.toggle('on', i < wizStep));
-  if (wizStep === 2) refreshChars();
-  if (wizStep === 3) refreshMaps();
-  if (wizStep === 4) refreshLobby();
+// ---------- Salas ----------
+// Paso 0: elegir sala (unirse a una publica, crear una publica/privada o entrar con codigo).
+// Si se crea: nombre/equipo → personaje → mapa → modo. Si se entra a una existente: nombre/equipo → personaje.
+let roomAction = null; // { type: 'create', pub } | { type: 'join', code, name }
+let roomsList = [];
+const roomErr = document.getElementById('roomErr');
+const codeInput = document.getElementById('codeInput');
+const MODE_NAME = { tdm: 'DeathMatch', elim: 'Guerra' };
+
+function renderRooms() {
+  const box = document.getElementById('roomList');
+  if (!roomsList.length) {
+    box.innerHTML = '<div class="empty">No hay salas públicas ahora. ¡Creá una!</div>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const r of roomsList) {
+    const row = document.createElement('div');
+    row.className = 'roomRow';
+    const map = (MAP.MAPS[r.map] || {}).name || '';
+    row.innerHTML = `<div class="ri"><b>${escapeHtml(r.name)}</b>${map} · ${MODE_NAME[r.mode]} · ${r.humans} jugando${r.bots ? ` + ${r.bots} bots` : ''} · quedan ${fmtTime(r.tl)}</div>`;
+    const b = document.createElement('button');
+    b.textContent = 'Unirme';
+    b.onclick = () => { roomAction = { type: 'join', code: r.c, name: r.name }; showStep(1); };
+    row.appendChild(b);
+    box.appendChild(row);
+  }
 }
-document.querySelectorAll('.wstep .next').forEach((b) => { b.onclick = () => showStep(wizStep + 1); });
-document.querySelectorAll('.wstep .back').forEach((b) => { b.onclick = () => showStep(wizStep - 1); });
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+socket.on('rooms', (list) => {
+  roomsList = list || [];
+  if (!myId && wizStep === 0) renderRooms();
+});
+document.getElementById('createPub').onclick = () => { roomAction = { type: 'create', pub: true }; showStep(1); };
+document.getElementById('createPriv').onclick = () => { roomAction = { type: 'create', pub: false }; showStep(1); };
+document.getElementById('codeJoin').onclick = () => {
+  const code = codeInput.value.trim().toUpperCase();
+  if (code.length !== 5) { roomErr.textContent = 'El código tiene 5 letras/números.'; return; }
+  roomErr.textContent = '';
+  roomAction = { type: 'join', code };
+  showStep(1);
+};
+codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('codeJoin').click(); });
+
+// Menu paso a paso
+let wizStep = 0;
+const stepsFor = () => (roomAction && roomAction.type === 'join' ? [1, 2] : [1, 2, 3, 4]);
+function showStep(n) {
+  wizStep = n;
+  document.querySelectorAll('.wstep').forEach((s) => { s.hidden = +s.dataset.step !== wizStep; });
+  const seq = stepsFor();
+  const idx = seq.indexOf(n);
+  const dots = document.querySelector('.dots');
+  dots.style.visibility = n === 0 ? 'hidden' : 'visible';
+  dots.innerHTML = seq.map((_, i) => `<i class="${i <= idx ? 'on' : ''}"></i>`).join('');
+  document.querySelectorAll('.wstep .step[data-title]').forEach((el) => {
+    const s = +el.closest('.wstep').dataset.step;
+    el.textContent = `Paso ${seq.indexOf(s) + 1} de ${seq.length} · ${el.dataset.title}`;
+  });
+  // en el paso 2, si se entra a una sala existente, ese es el ultimo paso
+  const joining = roomAction && roomAction.type === 'join';
+  document.querySelector('[data-step="2"] .next').textContent = joining ? 'ENTRAR A LA SALA' : 'Siguiente ›';
+  document.getElementById('roomInfo').textContent = !roomAction ? ''
+    : joining ? `Vas a entrar a ${roomAction.name ? roomAction.name : 'la sala'} (código ${roomAction.code}).`
+      : `Vas a crear una sala ${roomAction.pub ? 'pública (cualquiera puede entrar)' : 'privada (solo con el código)'}.`;
+  if (n === 0) { renderRooms(); socket.emit('listRooms'); }
+  if (n === 2) refreshChars();
+  if (n === 3) refreshMaps();
+  if (n === 4) refreshLobby();
+}
+document.querySelectorAll('.wstep .next').forEach((b) => {
+  b.onclick = () => {
+    const seq = stepsFor();
+    const i = seq.indexOf(wizStep);
+    if (i === seq.length - 1) enterGame(); else showStep(seq[i + 1]);
+  };
+});
+document.querySelectorAll('.wstep .back').forEach((b) => {
+  b.onclick = () => {
+    const seq = stepsFor();
+    const i = seq.indexOf(wizStep);
+    if (i <= 0) { roomAction = null; showStep(0); } else showStep(seq[i - 1]);
+  };
+});
 nameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { nameInput.blur(); showStep(2); }
 });
@@ -122,27 +194,14 @@ document.getElementById('mMinLess').onclick = () => { menuMins = Math.max(1, men
 document.getElementById('mMinMore').onclick = () => { menuMins = Math.min(MAP.MAX_MINUTES, menuMins + 1); refreshMenuMode(); };
 refreshMenuMode();
 
-// Muestra que se esta jugando ahora, para decidir si unirse o empezar otra
-const MODE_NAME = { tdm: 'DeathMatch', elim: 'Guerra' };
+// Resumen de la sala que se va a crear (ultimo paso)
 function refreshLobby() {
-  if (myId || !state) return;
-  const humans = state.p.filter((p) => !p.bt);
+  if (myId || !roomAction || roomAction.type !== 'create') return;
   const info = document.getElementById('lobbyInfo');
-  const play = document.getElementById('play');
-  const playNew = document.getElementById('playNew');
-  if (!humans.length) {
-    info.textContent = `No hay nadie jugando: se empieza ${MODE_NAME[menuMode]} en ${MAP.MAPS[menuMap].name}, ${menuMins} min.`;
-    play.textContent = 'JUGAR';
-    playNew.style.display = 'none';
-  } else {
-    const m = state.m;
-    const names = humans.map((p) => p.n).slice(0, 4).join(', ') + (humans.length > 4 ? '…' : '');
-    const mapName = (MAP.MAPS[m.mp] || {}).name || '';
-    info.textContent = `Partida en curso: ${MODE_NAME[m.mo]} en ${mapName} · quedan ${fmtTime(m.tl)} · ${humans.length} jugando (${names}).`;
-    play.textContent = 'UNIRME A ESTA PARTIDA';
-    playNew.textContent = `Empezar una nueva: ${MODE_NAME[menuMode]} en ${MAP.MAPS[menuMap].name} (reinicia para todos)`;
-    playNew.style.display = 'block';
-  }
+  info.textContent = `Sala ${roomAction.pub ? 'pública' : 'privada'}: ${MODE_NAME[menuMode]} en ${MAP.MAPS[menuMap].name}, ${menuMins} min.`
+    + (roomAction.pub ? '' : ' Te damos un código para pasarle a tus amigos.');
+  document.getElementById('play').textContent = 'CREAR SALA';
+  document.getElementById('playNew').style.display = 'none';
 }
 
 // ---------- Mapas: tarjetas con un dibujo del plano visto desde arriba ----------
@@ -189,16 +248,21 @@ function refreshMaps() {
   box.querySelectorAll('.mapc').forEach((b) => b.classList.toggle('sel', b.dataset.map === menuMap));
 }
 
-function enterGame(startNew) {
+function enterGame() {
+  if (!roomAction) { showStep(0); return; }
   const name = nameInput.value.trim() || 'Jugador';
   try {
     localStorage.setItem('rva_name', name);
     localStorage.setItem('rva_mode', menuMode);
     localStorage.setItem('rva_mins', menuMins);
   } catch (e) {}
-  // si no hay nadie, el servidor arranca la partida con este modo y mapa; si hay gente, solo con startNew
-  socket.emit('join', { name, team: chosenTeam, style: chosenStyle, mode: menuMode, minutes: menuMins, map: menuMap, start: !!startNew });
-  joinData = { name, team: chosenTeam, style: chosenStyle }; // para reconectar sin reiniciar la partida
+  const base = { name, team: chosenTeam, style: chosenStyle };
+  if (roomAction.type === 'create') {
+    socket.emit('createRoom', { ...base, public: roomAction.pub, mode: menuMode, minutes: menuMins, map: menuMap });
+  } else {
+    socket.emit('joinRoom', { ...base, code: roomAction.code });
+  }
+  joinData = { ...base, code: roomAction.type === 'join' ? roomAction.code : null }; // para reconectar
   menu.style.display = 'none';
   document.body.classList.add('playing');
   const el = document.documentElement;
@@ -208,8 +272,35 @@ function enterGame(startNew) {
     }).catch(() => {});
   }
 }
-document.getElementById('play').onclick = () => enterGame(false);
-document.getElementById('playNew').onclick = () => enterGame(true);
+document.getElementById('play').onclick = () => enterGame();
+
+// Volver al menu (al salir o si no se pudo entrar a la sala)
+function backToMenu(step) {
+  myId = null;
+  pred.ok = false;
+  touchShoot = mouseShoot = false;
+  fireId = null; joy.id = null; look.id = null;
+  document.querySelectorAll('.modal').forEach((m) => m.classList.remove('open'));
+  if (document.pointerLockElement) document.exitPointerLock();
+  document.body.classList.remove('playing');
+  menu.style.display = '';
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  roomAction = null;
+  showStep(step || 0);
+}
+socket.on('joinError', (msg) => {
+  joinData = null;
+  backToMenu(0);
+  roomErr.textContent = msg;
+});
+// Link de invitacion: ?sala=CODIGO entra directo a esa sala
+{
+  const code = new URLSearchParams(location.search).get('sala');
+  if (code) {
+    codeInput.value = code.toUpperCase();
+    roomAction = { type: 'join', code: code.toUpperCase() };
+  }
+}
 
 // ---------- Ventanas: partida/bots y tienda ----------
 const botsPanel = document.getElementById('botsPanel');
@@ -233,15 +324,7 @@ document.getElementById('exitYes').onclick = () => {
   exitAsk.classList.remove('open');
   socket.emit('leave');
   joinData = null; // que no vuelva a entrar solo al reconectar
-  myId = null;
-  pred.ok = false;
-  touchShoot = mouseShoot = false;
-  fireId = null; joy.id = null; look.id = null;
-  document.querySelectorAll('.modal').forEach((m) => m.classList.remove('open'));
-  if (document.pointerLockElement) document.exitPointerLock();
-  document.body.classList.remove('playing');
-  menu.style.display = '';
-  showStep(1);
+  backToMenu(0);
 };
 document.getElementById('shopBtn').onclick = () => openModal(shop);
 document.querySelectorAll('[data-close]').forEach((b) => {
@@ -277,10 +360,44 @@ function syncMatchPanel() {
   if (!state || !state.m) return;
   if (document.activeElement !== autoFillBox) autoFillBox.checked = !!state.m.af;
   const cr = state.p.find((p) => p.id === state.m.cr);
+  const iAmCreator = state.m.cr === myId;
   document.getElementById('creatorInfo').textContent =
-    state.m.cr === myId ? '👑 Sos el creador: te avisamos cuando se agregan o quitan bots.'
-      : cr ? `👑 Creador de la partida: ${cr.n}` : '';
+    iAmCreator ? '👑 Sos el creador de la sala: podés cambiar el mapa, la partida y los bots.'
+      : cr ? `👑 El creador de la sala es ${cr.n}: solo él o ella puede cambiar el mapa, la partida y los bots.` : '';
+  // lo que es solo del creador se ve apagado para los demas
+  botsPanel.querySelectorAll('.adminOnly').forEach((el) => el.classList.toggle('locked', !iAmCreator));
+  // datos de la sala para invitar
+  const room = state.m.room || myRoom;
+  if (room) {
+    document.getElementById('roomName').textContent = room.name;
+    document.getElementById('roomCode').textContent = room.c;
+    document.getElementById('roomPriv').textContent = room.pub ? 'pública' : '🔒 privada';
+  }
 }
+// Compartir el link de la sala (en el celular abre el menu de compartir; si no, lo copia)
+document.getElementById('shareRoom').onclick = async () => {
+  const room = (state && state.m && state.m.room) || myRoom;
+  if (!room) return;
+  const url = `${location.origin}${location.pathname}?sala=${room.c}`;
+  const text = `¡Vení a jugar Rojo vs Azul conmigo! Sala ${room.c}`;
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Rojo vs Azul', text, url }); return; }
+  } catch (e) { /* cancelado */ }
+  try {
+    await navigator.clipboard.writeText(url);
+    feed.push({ msg: '🔗 Link copiado: ' + url, at: performance.now() });
+  } catch (e) {
+    feed.push({ msg: 'Pasales este link: ' + url, at: performance.now() });
+  }
+};
+document.getElementById('switchTeam').onclick = () => {
+  socket.emit('switchTeam');
+  botsPanel.classList.remove('open');
+};
+document.getElementById('changeMapNow').onclick = () => {
+  socket.emit('changeMap', { map: newMap });
+  botsPanel.classList.remove('open');
+};
 
 // Nueva partida
 const MODE_INFO = {
@@ -383,12 +500,27 @@ function renderShop(force) {
 document.querySelectorAll('#tools button, .sheet button').forEach((b) => b.addEventListener('click', () => b.blur()));
 
 // ---------- Red ----------
+// Si se corta la conexion, al volver se reintenta entrar a la misma sala
 socket.on('connect', () => {
-  if (joinData) socket.emit('join', joinData);
+  if (joinData && joinData.code) socket.emit('joinRoom', joinData);
 });
+let myRoom = null; // { c: codigo, pub, name }
 socket.on('welcome', (d) => {
   myId = d.id;
   pred.ok = false;
+  myRoom = d.room || null;
+  if (joinData) {
+    joinData.team = d.team;
+    if (myRoom) joinData.code = myRoom.c;
+  }
+  // la direccion queda con el codigo: recargar vuelve a la misma sala y sirve para compartir
+  if (myRoom) try { history.replaceState(null, '', `${location.pathname}?sala=${myRoom.c}`); } catch (e) {}
+  if (myRoom && !myRoom.pub) {
+    notices.push({ msg: `🔒 Sala privada · código ${myRoom.c} · pasáselo a tus amigos`, at: performance.now() });
+  }
+});
+socket.on('teamChanged', (d) => {
+  pred.ok = false; // reaparece en la otra base
   if (joinData) joinData.team = d.team;
 });
 socket.on('state', (s) => {
@@ -1619,6 +1751,7 @@ function frame() {
   }
 
   update3D(now, meP, dt);
+  world.update(now); // la fuente del pueblo
   renderer.render(scene, camera);
 
   drawCrosshair(meP);
@@ -1628,4 +1761,5 @@ function frame() {
   drawControls();
 }
 requestAnimationFrame(frame);
+showStep(roomAction ? 1 : 0); // menu: paso de salas (o directo al nombre si vino con link de invitacion)
 window.__gameReady = true;
