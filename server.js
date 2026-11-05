@@ -514,12 +514,19 @@ io.on('connection', (socket) => {
     balanceTeams();
   });
 
+  // Quitar todos los bots tambien apaga el autocompletado, asi no vuelven (se puede jugar 3 vs 2)
   socket.on('clearBots', () => {
-    if (!players[socket.id]) return;
+    const p = players[socket.id];
+    if (!p) return;
     const n = removeBots();
-    if (n) io.emit('feed', `Se quitaron ${n} bots`);
+    const wasOn = match.autoFill;
+    match.autoFill = false;
+    if (n) io.emit('feed', `${p.name} quitó ${n} bot${n > 1 ? 's' : ''}`);
+    if (wasOn) {
+      io.emit('feed', 'Completar equipos con bots: desactivado');
+      notifyCreator('🤖 Se quitaron los bots y se apagó el autocompletado: los equipos pueden quedar desparejos');
+    }
     checkElimination(Date.now());
-    balanceTeams();
   });
 
   // Prender/apagar el autocompletado de equipos con bots
