@@ -48,6 +48,7 @@ let hitMark = { at: -1e9, head: false, kill: false };
 const popups = []; // textos que suben y se desvanecen
 
 const isFrozen = (s) => !!(s && s.m && s.m.ph !== 'playing');
+let lobbyAt = 0;
 
 // ---------- Menu ----------
 let chosenTeam = 'auto';
@@ -59,11 +60,81 @@ document.querySelectorAll('.teams button').forEach((b) => {
     chosenTeam = b.dataset.team;
   };
 });
-document.getElementById('play').onclick = () => {
+// Personaje: 2 estilos por equipo
+let chosenStyle = 0;
+try { chosenStyle = localStorage.getItem('rva_style') === '1' ? 1 : 0; } catch (e) {}
+const charPreviews = {}; // imagenes generadas con la vista 3D (se llenan mas abajo)
+function refreshChars() {
+  document.querySelectorAll('.char').forEach((b) => {
+    const s = +b.dataset.s;
+    b.classList.toggle('sel', s === chosenStyle);
+    const teams = chosenTeam === 'red' || chosenTeam === 'blue' ? [chosenTeam] : ['red', 'blue'];
+    const imgs = teams.map((t) => (charPreviews[t + s] ? `<img src="${charPreviews[t + s]}" alt="">` : '')).join('');
+    const names = teams.map((t) => MAP.STYLES[t][s].name).join(' / ');
+    const desc = teams.length === 1 ? MAP.STYLES[teams[0]][s].desc : 'Según el equipo que te toque';
+    b.innerHTML = `<div class="imgs">${imgs}</div><div><b>${names}</b><span>${desc}</span></div>`;
+  });
+}
+document.querySelectorAll('.char').forEach((b) => {
+  b.onclick = () => {
+    chosenStyle = +b.dataset.s;
+    try { localStorage.setItem('rva_style', chosenStyle); } catch (e) {}
+    refreshChars();
+  };
+});
+document.querySelectorAll('.teams button').forEach((b) => b.addEventListener('click', refreshChars));
+refreshChars();
+
+// Paso 2: modo de juego y minutos
+let menuMode = 'tdm';
+let menuMins = 5;
+try {
+  menuMode = localStorage.getItem('rva_mode') === 'elim' ? 'elim' : 'tdm';
+  menuMins = Math.min(MAP.MAX_MINUTES, Math.max(1, +localStorage.getItem('rva_mins') || 5));
+} catch (e) {}
+function refreshMenuMode() {
+  document.querySelectorAll('.mmode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === menuMode));
+  document.getElementById('mMinVal').textContent = menuMins;
+}
+document.querySelectorAll('.mmode').forEach((b) => {
+  b.onclick = () => { menuMode = b.dataset.mode; refreshMenuMode(); refreshLobby(); };
+});
+document.getElementById('mMinLess').onclick = () => { menuMins = Math.max(1, menuMins - 1); refreshMenuMode(); };
+document.getElementById('mMinMore').onclick = () => { menuMins = Math.min(MAP.MAX_MINUTES, menuMins + 1); refreshMenuMode(); };
+refreshMenuMode();
+
+// Muestra que se esta jugando ahora, para decidir si unirse o empezar otra
+const MODE_NAME = { tdm: 'Reaparición', elim: 'Eliminación' };
+function refreshLobby() {
+  if (myId || !state) return;
+  const humans = state.p.filter((p) => !p.bt);
+  const info = document.getElementById('lobbyInfo');
+  const play = document.getElementById('play');
+  const playNew = document.getElementById('playNew');
+  if (!humans.length) {
+    info.textContent = `No hay nadie jugando: se empieza una partida de ${MODE_NAME[menuMode]} de ${menuMins} min.`;
+    play.textContent = 'JUGAR';
+    playNew.style.display = 'none';
+  } else {
+    const m = state.m;
+    const names = humans.map((p) => p.n).slice(0, 4).join(', ') + (humans.length > 4 ? '…' : '');
+    info.textContent = `Partida en curso: ${MODE_NAME[m.mo]} · quedan ${fmtTime(m.tl)} · ${humans.length} jugando (${names}).`;
+    play.textContent = 'UNIRME A ESTA PARTIDA';
+    playNew.textContent = `Empezar una nueva de ${MODE_NAME[menuMode]} (reinicia para todos)`;
+    playNew.style.display = 'block';
+  }
+}
+
+function enterGame(startNew) {
   const name = nameInput.value.trim() || 'Jugador';
-  try { localStorage.setItem('rva_name', name); } catch (e) {}
-  joinData = { name, team: chosenTeam };
-  socket.emit('join', joinData);
+  try {
+    localStorage.setItem('rva_name', name);
+    localStorage.setItem('rva_mode', menuMode);
+    localStorage.setItem('rva_mins', menuMins);
+  } catch (e) {}
+  // si no hay nadie, el servidor arranca la partida con este modo; si hay gente, solo con startNew
+  socket.emit('join', { name, team: chosenTeam, style: chosenStyle, mode: menuMode, minutes: menuMins, start: !!startNew });
+  joinData = { name, team: chosenTeam, style: chosenStyle }; // para reconectar sin reiniciar la partida
   menu.style.display = 'none';
   document.body.classList.add('playing');
   const el = document.documentElement;
@@ -72,7 +143,9 @@ document.getElementById('play').onclick = () => {
       if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
     }).catch(() => {});
   }
-};
+}
+document.getElementById('play').onclick = () => enterGame(false);
+document.getElementById('playNew').onclick = () => enterGame(true);
 
 // ---------- Ventanas: partida/bots y tienda ----------
 const botsPanel = document.getElementById('botsPanel');
@@ -146,7 +219,8 @@ function renderShop(force) {
   const eq = me ? me.w : 0;
   document.getElementById('coinsBtn').textContent = '$' + coins;
   document.getElementById('coinsShop').textContent = '$' + coins;
-  const key = coins + '|' + owned + '|' + eq;
+  const grs = me ? me.gr : 0;
+  const key = coins + '|' + owned + '|' + eq + '|' + grs;
   if (!force && (key === shopKey || !shop.classList.contains('open'))) return;
   shopKey = key;
   shopList.innerHTML = '';
@@ -175,6 +249,23 @@ function renderShop(force) {
     card.appendChild(btn);
     shopList.appendChild(card);
   }
+
+  // Granada (se compra por unidad, maximo GR.max)
+  const G = MAP.GRENADE;
+  const card = document.createElement('div');
+  card.className = 'wcard' + (grs ? ' eq' : '');
+  card.innerHTML = `
+    <div class="nm">💣 Granada</div>
+    <div class="pr">$${G.price} c/u</div>
+    <div class="ds">Explota a los ${G.fuse / 1000} s. Más cerca del centro, más daño. Podés llevar ${G.max}.</div>
+    <div class="stat"><span>Tenés</span><b>${grs} / ${G.max}</b></div>`;
+  const btn = document.createElement('button');
+  if (grs >= G.max) { btn.textContent = 'Llevás el máximo'; btn.disabled = true; }
+  else if (coins >= G.price) { btn.textContent = `Comprar $${G.price}`; btn.className = 'buy'; }
+  else { btn.textContent = `Faltan $${G.price - coins}`; btn.className = 'buy'; btn.disabled = true; }
+  btn.onclick = () => { btn.blur(); socket.emit('buyGrenade'); };
+  card.appendChild(btn);
+  shopList.appendChild(card);
 }
 
 // que la barra espaciadora (disparo en PC) no vuelva a apretar botones
@@ -216,6 +307,7 @@ socket.on('state', (s) => {
   const mine = s.p.find((p) => p.id === myId);
   if (mine) reconcile(mine, s);
   renderShop(false);
+  if (!myId && performance.now() - lobbyAt > 500) { lobbyAt = performance.now(); refreshLobby(); }
 });
 socket.on('hit', (d) => {
   const now = performance.now();
@@ -284,13 +376,29 @@ function fireBtn() {
   const r = Math.max(48, Math.min(70, H * 0.13));
   return { x: W - r - 34, y: H - r - 34, r };
 }
+// Boton de granada: arriba a la izquierda del de disparo
+function grenadeBtn() {
+  const fb = fireBtn();
+  const r = Math.max(26, fb.r * 0.5);
+  return { x: fb.x - fb.r - r - 6, y: fb.y - fb.r - r + 10, r };
+}
+let lastThrowAt = -1e9;
+function throwGrenade() {
+  const now = performance.now();
+  if (now - lastThrowAt < MAP.GRENADE.cooldown) return;
+  lastThrowAt = now;
+  socket.emit('throw');
+}
 
 hud.addEventListener('touchstart', (e) => {
   e.preventDefault();
   for (const t of e.changedTouches) {
     const fb = fireBtn();
+    const gb = grenadeBtn();
     const onFire = Math.hypot(t.clientX - fb.x, t.clientY - fb.y) < fb.r * 1.4;
-    if (onFire && fireId === null) {
+    if (Math.hypot(t.clientX - gb.x, t.clientY - gb.y) < gb.r * 1.25) {
+      throwGrenade();
+    } else if (onFire && fireId === null) {
       fireId = t.identifier;
       touchShoot = true;
       fire.x = fire.lx = fire.sx = t.clientX;
@@ -352,7 +460,11 @@ hud.addEventListener('touchend', touchEnd, { passive: false });
 hud.addEventListener('touchcancel', touchEnd, { passive: false });
 
 // Teclado + mouse (PC)
-addEventListener('keydown', (e) => { keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'Space') e.preventDefault();
+  if (e.code === 'KeyG' && myId && document.activeElement !== nameInput) throwGrenade();
+});
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 hud.addEventListener('mousedown', () => {
   if (isTouch) return;
@@ -531,6 +643,24 @@ function setViewWeapon(w) {
   gunMag.visible = !!st.mag;
 }
 setViewWeapon(0);
+// Manga del brazo en primera persona, con el color de tu personaje
+const sleeveMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+const sleeve = new THREE.Mesh(new THREE.BoxGeometry(7, 7, 26), sleeveMat);
+sleeve.position.set(1, -9, 18);
+sleeve.rotation.x = 0.35;
+viewGun.add(sleeve);
+const hand = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 6), new THREE.MeshLambertMaterial({ color: 0xf0c9a0 }));
+hand.position.set(0, -7, 6);
+viewGun.add(hand);
+let sleeveKey = '';
+function setViewSleeve(team, s) {
+  const key = team + s;
+  if (key === sleeveKey) return;
+  sleeveKey = key;
+  const st = styleOf(team, s);
+  sleeveMat.color.setHex(st.body);
+  hand.material.color.setHex(st.skin);
+}
 const GUN_POS = new THREE.Vector3(11, -10, -28);
 viewGun.scale.setScalar(0.6);
 viewGun.position.copy(GUN_POS);
@@ -578,30 +708,114 @@ function drawLabel(l, name, hp, team) {
   l.tex.needsUpdate = true;
 }
 
+// Arma un personaje segun equipo y estilo. Mira hacia +x. Devuelve las partes que se animan.
+const styleOf = (team, s) => (MAP.STYLES[team] || MAP.STYLES.red)[s === 1 ? 1 : 0];
+function buildCharacter(team, s) {
+  const st = styleOf(team, s);
+  const mats = []; // materiales propios (para liberarlos despues)
+  const mat = (color, basic) => {
+    const m = basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color });
+    mats.push(m);
+    return m;
+  };
+  const add = (g, geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); g.add(o); return o; };
+
+  const g = new THREE.Group();
+  const teamMat = new THREE.MeshLambertMaterial({ color: st.body, transparent: true });
+  mats.push(teamMat);
+  const accent = mat(st.accent);
+  const skin = mat(st.skin);
+  const legM = mat(st.legs);
+
+  add(g, bodyGeo, teamMat, 0, 45, 0); // torso (22-68)
+  const legL = add(g, legGeo, legM, 0, 11, -8);
+  const legR = add(g, legGeo, legM, 0, 11, 8);
+  add(g, headGeo, skin, 0, 80, 0); // cabeza (67-93)
+  // brazos
+  add(g, new THREE.BoxGeometry(8, 26, 8), teamMat, 4, 50, -20);
+  add(g, new THREE.BoxGeometry(22, 7, 7), teamMat, 12, BULLET_H, 14);
+
+  // Cabeza
+  if (st.hat === 'helmet') {
+    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 81, 0);
+    add(g, new THREE.CylinderGeometry(15.5, 15.5, 2.5, 16), accent, 0, 81, 0);
+    add(g, visorGeo, darkMat, 11, 79, 0);
+  } else if (st.hat === 'bandana') {
+    add(g, new THREE.CylinderGeometry(13.8, 13.8, 5, 16), accent, 0, 84, 0);
+    add(g, new THREE.BoxGeometry(6, 3, 3), accent, -15, 83, 3);
+    add(g, new THREE.BoxGeometry(18, 9, 3), accent, -1, 94, 0); // cresta
+    add(g, visorGeo, darkMat, 11, 79, 0);
+  } else if (st.hat === 'goggles') {
+    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 81, 0);
+    add(g, new THREE.BoxGeometry(5, 6, 20), mat(0x6fe0ff, true), 12, 82, 0); // antiparras brillantes
+  } else if (st.hat === 'cap') {
+    add(g, new THREE.CylinderGeometry(13.9, 13.9, 7, 16), accent, 0, 88, 0);
+    add(g, new THREE.BoxGeometry(14, 2, 20), accent, 14, 85, 0); // visera
+    add(g, visorGeo, darkMat, 11, 79, 0);
+  }
+
+  // Equipamiento
+  if (st.gear === 'vest') {
+    add(g, new THREE.CylinderGeometry(18.5, 20, 30, 14), accent, 0, 50, 0);
+    add(g, new THREE.BoxGeometry(5, 9, 8), mat(0x3a2a20), 19, 46, -6);
+    add(g, new THREE.BoxGeometry(5, 9, 8), mat(0x3a2a20), 19, 46, 6);
+  } else if (st.gear === 'backpack') {
+    add(g, new THREE.BoxGeometry(11, 28, 24), mat(0x3b2f2a), -21, 50, 0);
+    add(g, new THREE.BoxGeometry(4, 8, 20), accent, -27, 58, 0);
+  } else if (st.gear === 'pads') {
+    add(g, new THREE.SphereGeometry(8.5, 10, 8), accent, 0, 65, -17);
+    add(g, new THREE.SphereGeometry(8.5, 10, 8), accent, 0, 65, 17);
+    add(g, new THREE.CylinderGeometry(19.5, 19.5, 5, 14), accent, 0, 30, 0); // cinturon
+  } else if (st.gear === 'scarf') {
+    add(g, new THREE.CylinderGeometry(15, 17, 7, 14), accent, 0, 69, 0);
+    add(g, new THREE.BoxGeometry(4, 18, 6), accent, -16, 60, 6);
+    add(g, new THREE.BoxGeometry(10, 24, 20), mat(0x2b2f3a), -20, 50, 0);
+  }
+
+  const gunMatA = new THREE.MeshLambertMaterial({ color: 0x1d2128 });
+  mats.push(gunMatA);
+  const gun = add(g, gunGeo, gunMatA, 26, BULLET_H, 12);
+  const muzzle = add(g, new THREE.SphereGeometry(5, 8, 8), mat(0xffe27a, true), 46, BULLET_H, 12);
+  return { g, teamMat, legL, legR, gun, gunMatA, muzzle, mats };
+}
+
+// Fotos de los 4 personajes para el menu (se dibujan una vez con un renderizador chico)
+function renderCharPreviews() {
+  try {
+    const PW = 110, PH = 150;
+    const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    r.setPixelRatio(2);
+    r.setSize(PW, PH);
+    const sc = new THREE.Scene();
+    sc.add(new THREE.HemisphereLight(0xffffff, 0x445066, 2.6));
+    const dl = new THREE.DirectionalLight(0xffffff, 1.8);
+    dl.position.set(1, 1.4, 0.8);
+    sc.add(dl);
+    const cam = new THREE.PerspectiveCamera(30, PW / PH, 1, 2000);
+    cam.position.set(185, 70, 95);
+    cam.lookAt(0, 52, 0);
+    for (const t of ['red', 'blue']) {
+      for (const s of [0, 1]) {
+        const c = buildCharacter(t, s);
+        c.muzzle.visible = false;
+        sc.add(c.g);
+        r.render(sc, cam);
+        charPreviews[t + s] = r.domElement.toDataURL('image/png');
+        sc.remove(c.g);
+        c.mats.forEach((m) => m.dispose());
+      }
+    }
+    r.dispose();
+    r.forceContextLoss();
+  } catch (e) { /* sin vista previa: el menu funciona igual */ }
+  refreshChars();
+}
+
 function getAvatar(p) {
   let a = avatars[p.id];
-  if (a && a.team === p.t) return a;
+  if (a && a.team === p.t && a.style === p.sy) return a;
   if (a) removeAvatar(p.id);
-  const g = new THREE.Group();
-  const teamMat = new THREE.MeshLambertMaterial({ color: TEAM_HEX[p.t], transparent: true });
-  const body = new THREE.Mesh(bodyGeo, teamMat);
-  body.position.y = 45;
-  g.add(body);
-  const legL = new THREE.Mesh(legGeo, darkMat); legL.position.set(0, 11, -8); g.add(legL);
-  const legR = new THREE.Mesh(legGeo, darkMat); legR.position.set(0, 11, 8); g.add(legR);
-  const head = new THREE.Mesh(headGeo, skinMat);
-  head.position.y = 80;
-  g.add(head);
-  const visor = new THREE.Mesh(visorGeo, darkMat);
-  visor.position.set(11, 82, 0);
-  g.add(visor);
-  const gunMatA = new THREE.MeshLambertMaterial({ color: 0x1d2128 });
-  const gun = new THREE.Mesh(gunGeo, gunMatA);
-  gun.position.set(26, BULLET_H, 12);
-  g.add(gun);
-  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffe27a }));
-  muzzle.position.set(46, BULLET_H, 12);
-  g.add(muzzle);
+  const { g, teamMat, legL, legR, gun, gunMatA, muzzle, mats } = buildCharacter(p.t, p.sy);
   const shadow = new THREE.Mesh(shadowGeo, shadowMat);
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.8;
@@ -611,19 +825,21 @@ function getAvatar(p) {
   root.add(shadow);
   root.add(label.sprite);
   scene.add(root);
-  a = avatars[p.id] = { root, body: g, teamMat, muzzle, label, legL, legR, team: p.t, walk: 0, lx: 0, ly: 0, gun, gunMatA, w: -1 };
+  a = avatars[p.id] = { root, body: g, teamMat, muzzle, label, legL, legR, team: p.t, style: p.sy, walk: 0, lx: 0, ly: 0, gun, gunMatA, mats, w: -1 };
   return a;
 }
 function removeAvatar(id) {
   const a = avatars[id];
   if (!a) return;
   scene.remove(a.root);
-  a.teamMat.dispose();
-  a.gunMatA.dispose();
+  a.mats.forEach((m) => m.dispose());
+  a.root.traverse((o) => { if (o.geometry && !o.isSprite && !SHARED_GEOS.has(o.geometry)) o.geometry.dispose(); });
   a.label.tex.dispose();
   a.label.sprite.material.dispose();
   delete avatars[id];
 }
+const SHARED_GEOS = new Set([bodyGeo, headGeo, visorGeo, gunGeo, legGeo, shadowGeo]);
+renderCharPreviews();
 
 // Balas
 const bulletGeo = new THREE.SphereGeometry(3.5, 8, 6);
@@ -650,6 +866,65 @@ function getBullet(i) {
     bulletPool[i] = g;
   }
   return bulletPool[i];
+}
+
+// Granadas y explosiones
+const grenadeGeo = new THREE.SphereGeometry(6, 10, 8);
+const grenadeMat = new THREE.MeshLambertMaterial({ color: 0x3f5a2e });
+const grenadeLightMat = new THREE.MeshBasicMaterial({ color: 0xff3030 });
+const grenadePool = [];
+function getGrenade(i) {
+  if (!grenadePool[i]) {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(grenadeGeo, grenadeMat));
+    const led = new THREE.Mesh(new THREE.SphereGeometry(2.2, 6, 6), grenadeLightMat);
+    led.position.y = 6;
+    g.add(led);
+    g.userData.led = led;
+    scene.add(g);
+    grenadePool[i] = g;
+  }
+  return grenadePool[i];
+}
+const blasts = []; // explosiones visibles
+const blastGeo = new THREE.SphereGeometry(1, 20, 14);
+let shakeUntil = 0, shakeAmt = 0;
+socket.on('boom', (b) => {
+  const now = performance.now();
+  const fire = new THREE.Mesh(blastGeo, new THREE.MeshBasicMaterial({ color: 0xffa030, transparent: true, opacity: 0.9, depthWrite: false }));
+  fire.position.set(b.x, Math.max(10, b.z), b.y);
+  scene.add(fire);
+  // anillo en el piso que muestra el alcance
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.85, 1, 40),
+    new THREE.MeshBasicMaterial({ color: 0xff7020, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(b.x, 1.5, b.y);
+  scene.add(ring);
+  blasts.push({ fire, ring, at: now });
+  // sacudon de camara si estoy cerca
+  const d = Math.hypot(pred.x - b.x, pred.y - b.y);
+  const R = MAP.GRENADE.radius;
+  if (d < R * 2) { shakeUntil = now + 450; shakeAmt = 7 * (1 - d / (R * 2)); }
+});
+function updateBlasts(now) {
+  const R = MAP.GRENADE.radius;
+  for (let i = blasts.length - 1; i >= 0; i--) {
+    const b = blasts[i];
+    const t = (now - b.at) / 550;
+    if (t >= 1) {
+      scene.remove(b.fire); scene.remove(b.ring);
+      b.fire.material.dispose(); b.ring.material.dispose(); b.ring.geometry.dispose();
+      blasts.splice(i, 1);
+      continue;
+    }
+    b.fire.scale.setScalar(20 + R * 0.55 * Math.sqrt(t));
+    b.fire.material.opacity = 0.9 * (1 - t);
+    b.fire.material.color.setHex(t < 0.25 ? 0xfff0a0 : 0xff7a20);
+    b.ring.scale.setScalar(R * Math.min(1, t * 2.2));
+    b.ring.material.opacity = 0.6 * (1 - t);
+  }
 }
 
 function resize() {
@@ -685,7 +960,7 @@ function update3D(now, meP, dt) {
   viewGun.position.set(GUN_POS.x, GUN_POS.y + (moving ? Math.sin(now / 90) * 0.6 : 0), GUN_POS.z + kick * 2.5);
   flash.visible = firing && kick > 0.6;
   viewGun.visible = !!meP && meP.al;
-  if (meP) setViewWeapon(meP.w);
+  if (meP) { setViewWeapon(meP.w); setViewSleeve(meP.t, meP.sy); }
 
   // Otros jugadores
   for (const p of state.p) {
@@ -734,6 +1009,24 @@ function update3D(now, meP, dt) {
     g.userData.t.material = tracerMats[team];
   }
   for (; i < bulletPool.length; i++) bulletPool[i].visible = false;
+
+  // Granadas: la luz titila mas rapido cuando esta por explotar
+  let gi = 0;
+  for (const [, x, y, z, left] of state.g || []) {
+    const g = getGrenade(gi++);
+    g.visible = true;
+    g.position.set(x, z, y);
+    g.userData.led.visible = Math.floor(now / Math.max(60, left / 6)) % 2 === 0;
+  }
+  for (; gi < grenadePool.length; gi++) grenadePool[gi].visible = false;
+  updateBlasts(now);
+
+  // Sacudon de camara por explosion cercana
+  if (now < shakeUntil) {
+    const k = (shakeUntil - now) / 450;
+    camera.position.x += (Math.random() - 0.5) * shakeAmt * k;
+    camera.position.y += (Math.random() - 0.5) * shakeAmt * k;
+  }
 }
 
 // ---------- HUD 2D ----------
@@ -887,7 +1180,7 @@ function drawHUD(now, meP) {
       ctx.font = 'bold 13px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.textAlign = 'left';
-      ctx.fillText((MAP.WEAPONS[meP.w] || MAP.WEAPONS[0]).name, bx, by - 8);
+      ctx.fillText((MAP.WEAPONS[meP.w] || MAP.WEAPONS[0]).name + (meP.gr ? `  ·  💣 x${meP.gr}${isTouch ? '' : ' (G)'}` : ''), bx, by - 8);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#f2c94c';
       ctx.fillText('$' + meP.c, bx + bw, by - 8);
@@ -967,6 +1260,25 @@ function drawControls() {
   ctx.beginPath(); ctx.arc(baseX, baseY, JOY_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.beginPath(); ctx.arc(knobX, knobY, 26, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Boton de granada (con la cantidad que tenes)
+  const meP = state && state.p.find((p) => p.id === myId);
+  const grs = meP ? meP.gr : 0;
+  const gb = grenadeBtn();
+  ctx.globalAlpha = grs ? 0.9 : 0.35;
+  ctx.fillStyle = 'rgba(60,90,50,0.75)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(gb.x, gb.y, gb.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.font = `${Math.round(gb.r * 0.9)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('💣', gb.x, gb.y + 1);
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px system-ui, sans-serif';
+  ctx.fillText('x' + grs, gb.x + gb.r * 0.75, gb.y + gb.r + 4);
   ctx.globalAlpha = 1;
 
   const base = fireBtn();

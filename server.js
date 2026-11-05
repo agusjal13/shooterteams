@@ -30,6 +30,9 @@ const players = {};
 let bullets = [];
 let score = { red: 0, blue: 0 }; // bajas por equipo
 let bulletId = 0;
+let grenades = []; // granadas en el aire / en el piso
+let grenadeId = 0;
+const GR = MAP.GRENADE;
 
 // ---- Partida ----
 // mode: 'tdm' = con reaparicion, gana el equipo con mas bajas al terminar el tiempo
@@ -117,12 +120,14 @@ function teamName(t) {
   return t === 'red' ? 'ROJO' : 'AZUL';
 }
 
-function newPlayer(id, name, team, isBot) {
+function newPlayer(id, name, team, isBot, style) {
   return {
     id, name, team, isBot: !!isBot,
+    style: style === 1 ? 1 : 0, // personaje elegido (0 o 1 dentro de su equipo)
     x: 0, y: 0, a: 0, hp: 100, alive: true,
     kills: 0, deaths: 0, lastShot: 0, respawnAt: 0, protectUntil: 0,
     coins: MAP.START_COINS, owned: 1, weapon: 0, // owned = armas compradas (bits)
+    grenades: 0, lastThrow: 0,
     input: { mx: 0, my: 0, a: 0, p: 0, shoot: false },
   };
 }
@@ -157,8 +162,10 @@ function startMatch(mode, minutes) {
     p.coins = MAP.START_COINS;
     p.owned = 1;
     p.weapon = 0;
+    p.grenades = 0;
     spawn(p);
   }
+  grenades = [];
 }
 
 function startRound() {
@@ -167,6 +174,7 @@ function startRound() {
   match.banner = '';
   match.bannerTeam = null;
   bullets = [];
+  grenades = [];
   for (const id in players) spawn(players[id]);
 }
 
@@ -206,6 +214,77 @@ function checkElimination(now) {
   if (!alive.red && !alive.blue) roundWin(null, now);
   else if (!alive.red) roundWin('blue', now);
   else if (!alive.blue) roundWin('red', now);
+}
+
+// ---- Granadas ----
+function buyGrenade(p) {
+  if (p.grenades >= GR.max) return `Máximo ${GR.max} granadas`;
+  if (p.coins < GR.price) return `Te faltan $${GR.price - p.coins}`;
+  p.coins -= GR.price;
+  p.grenades++;
+  return null;
+}
+
+function throwGrenade(p, now) {
+  if (!p.alive || p.grenades <= 0 || match.phase !== 'playing' || now - p.lastThrow < GR.cooldown) return;
+  p.lastThrow = now;
+  p.grenades--;
+  const a = p.input.a;
+  // se tira hacia donde mira, con una curva hacia arriba
+  const pitch = clamp((p.input.p || 0) + 0.3, -0.5, 1.2);
+  const hs = Math.cos(pitch) * GR.throwSpeed;
+  let x = p.x + Math.cos(a) * (P_R + 6);
+  let y = p.y + Math.sin(a) * (P_R + 6);
+  if (pointInWall(x, y)) { x = p.x; y = p.y; }
+  grenades.push({
+    id: ++grenadeId, x, y, z: MAP.EYE_H - 8,
+    vx: Math.cos(a) * hs, vy: Math.sin(a) * hs, vz: Math.sin(pitch) * GR.throwSpeed,
+    owner: p.id, team: p.team, explodeAt: now + GR.fuse,
+  });
+}
+
+function updateGrenades(now) {
+  const keep = [];
+  for (const g of grenades) {
+    // movimiento con gravedad y rebotes contra paredes y piso
+    g.vz -= GR.gravity * DT;
+    const nx = g.x + g.vx * DT;
+    if (nx < 0 || nx > MAP.W || pointInWall3(nx, g.y, g.z)) g.vx *= -0.45; else g.x = nx;
+    const ny = g.y + g.vy * DT;
+    if (ny < 0 || ny > MAP.H || pointInWall3(g.x, ny, g.z)) g.vy *= -0.45; else g.y = ny;
+    const nz = g.z + g.vz * DT;
+    if (nz <= 4) {
+      g.z = 4;
+      g.vz = Math.abs(g.vz) > 60 ? -g.vz * 0.35 : 0;
+      g.vx *= 0.7; g.vy *= 0.7; // friccion con el piso
+    } else if (pointInWall3(g.x, g.y, nz)) {
+      g.vz = 0; // cae arriba de una caja
+      g.vx *= 0.7; g.vy *= 0.7;
+    } else g.z = nz;
+
+    if (now >= g.explodeAt) explode(g, now);
+    else keep.push(g);
+  }
+  grenades = keep;
+}
+
+function explode(g, now) {
+  io.emit('boom', { x: Math.round(g.x), y: Math.round(g.y), z: Math.round(g.z) });
+  const thrower = players[g.owner];
+  for (const id in players) {
+    const q = players[id];
+    if (!q.alive || q.team === g.team) continue; // no lastima a tu equipo
+    const d = Math.hypot(q.x - g.x, q.y - g.y, (45 - g.z) * 0.5);
+    if (d > GR.radius) continue;
+    if (!lineOfSight(g.x, g.y, q.x, q.y)) continue; // las paredes cubren
+    if (now < q.protectUntil) continue;
+    // daño segun la distancia: maximo en el centro, minimo en el borde
+    const dmg = Math.round(GR.maxDmg - (GR.maxDmg - GR.minDmg) * (d / GR.radius));
+    q.hp -= dmg;
+    const k = q.hp <= 0;
+    if (k) kill(q, thrower, now, false, true);
+    notifyHit(thrower, false, k);
+  }
 }
 
 // ---- Tienda ----
@@ -261,7 +340,7 @@ function addBot(team) {
     team = c.red <= c.blue ? 'red' : 'blue';
   }
   const id = 'bot-' + ++botSeq;
-  const p = newPlayer(id, 'Bot ' + botSeq, team, true);
+  const p = newPlayer(id, 'Bot ' + botSeq, team, true, Math.random() < 0.5 ? 0 : 1);
   p.bot = { reactAt: 0, strafe: 1, strafeAt: 0, lastX: 0, lastY: 0, checkAt: 0, wanderUntil: 0, wanderA: 0 };
   placeNewPlayer(p);
   players[id] = p;
@@ -385,6 +464,18 @@ io.on('connection', (socket) => {
     io.emit('feed', `${p.name} empezó una partida: ${modo}, ${match.minutes} min`);
   });
 
+  socket.on('buyGrenade', () => {
+    const p = players[socket.id];
+    if (!p) return;
+    const err = buyGrenade(p);
+    if (err) socket.emit('feed', err);
+  });
+
+  socket.on('throw', () => {
+    const p = players[socket.id];
+    if (p) throwGrenade(p, Date.now());
+  });
+
   socket.on('buy', (data) => {
     const p = players[socket.id];
     if (!p || !data) return;
@@ -401,11 +492,18 @@ io.on('connection', (socket) => {
       const c = teamCounts();
       team = c.red <= c.blue ? 'red' : 'blue';
     }
-    const p = newPlayer(socket.id, name, team, false);
+    // Si no hay nadie jugando, o el jugador pidio empezar una nueva, arranca con el modo que eligio.
+    const startNew = humanCount() === 0 || data.start === true;
+    const p = newPlayer(socket.id, name, team, false, Number(data.style));
     placeNewPlayer(p);
     players[socket.id] = p;
     socket.emit('welcome', { id: socket.id, team });
     io.emit('feed', `${name} entró al equipo ${teamName(team)}`);
+    if (startNew && (data.mode === 'tdm' || data.mode === 'elim')) {
+      startMatch(data.mode, data.minutes);
+      const modo = match.mode === 'elim' ? 'Eliminación' : 'Con reaparición';
+      io.emit('feed', `${name} empezó una partida: ${modo}, ${match.minutes} min`);
+    }
   });
 
   socket.on('input', (inp) => {
@@ -433,7 +531,7 @@ io.on('connection', (socket) => {
   });
 });
 
-function kill(victim, shooter, now, head) {
+function kill(victim, shooter, now, head, grenade) {
   setDead(victim, match.mode === 'elim' ? Infinity : now + RESPAWN_MS);
   victim.deaths++;
   if (shooter) {
@@ -441,7 +539,7 @@ function kill(victim, shooter, now, head) {
     shooter.coins += head ? MAP.HEADSHOT_COINS : MAP.KILL_COINS;
   }
   score[victim.team === 'red' ? 'blue' : 'red']++;
-  io.emit('feed', `${shooter ? shooter.name : '???'} ${head ? '🎯' : '✖'} ${victim.name}`);
+  io.emit('feed', `${shooter ? shooter.name : '???'} ${grenade ? '💣' : head ? '🎯' : '✖'} ${victim.name}`);
   checkElimination(now);
 }
 
@@ -582,6 +680,8 @@ function tick() {
     if (!dead && b.life > 0 && match.phase === 'playing') alive.push(b);
   }
   bullets = alive;
+  if (match.phase === 'playing') updateGrenades(now);
+  else grenades = [];
 
   const list = [];
   for (const id in players) {
@@ -595,13 +695,14 @@ function tick() {
       sf: now - p.lastShot < 70,
       q: p.input.q || 0,
       bt: !!p.isBot,
-      w: p.weapon, c: p.coins, o: p.owned,
+      w: p.weapon, c: p.coins, o: p.owned, gr: p.grenades, sy: p.style,
     });
   }
   io.volatile.emit('state', {
     p: list,
     b: bullets.map((b) => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.team === 'red' ? 0 : 1, Math.round(b.z), Math.round(b.vz)]),
     s: score,
+    g: grenades.map((g) => [g.id, Math.round(g.x), Math.round(g.y), Math.round(g.z), Math.max(0, g.explodeAt - now)]),
     m: {
       mo: match.mode,
       min: match.minutes,

@@ -72,11 +72,25 @@
       desc: 'Dispara muy rápido, menos daño por bala.' },
   ];
 
+  // Personajes: 2 estilos por equipo (solo cambia el aspecto; el cuerpo y la cabeza miden lo mismo).
+  // body = color del cuerpo, accent = color del equipamiento, hat = que lleva en la cabeza, gear = accesorio.
+  const STYLES = {
+    red: [
+      { name: 'Brasa', desc: 'Casco y chaleco táctico', body: 0xe23b4c, accent: 0x6e1420, skin: 0xf0c9a0, legs: 0x2a1d1f, hat: 'helmet', gear: 'vest' },
+      { name: 'Fénix', desc: 'Bandana, cresta y mochila', body: 0xc92a3c, accent: 0xff9a2e, skin: 0xb07850, legs: 0x1d2128, hat: 'bandana', gear: 'backpack' },
+    ],
+    blue: [
+      { name: 'Glaciar', desc: 'Casco blanco con antiparras', body: 0x2f7fe6, accent: 0xe8f2ff, skin: 0xf0c9a0, legs: 0x1d2534, hat: 'goggles', gear: 'pads' },
+      { name: 'Tormenta', desc: 'Gorra, bufanda y mochila', body: 0x2259b8, accent: 0xf2c94c, skin: 0x8d5a3b, legs: 0x1d2128, hat: 'cap', gear: 'scarf' },
+    ],
+  };
+
   const MAP = {
     W,
     H,
     walls,
     resolve,
+    STYLES,
     WEAPONS,
     START_COINS: 100,
     KILL_COINS: 5,
@@ -90,6 +104,18 @@
     HEAD_R: 15, // radio de la cabeza
     MAX_PITCH: 0.7, // cuanto se puede mirar arriba/abajo (radianes, ~40 grados)
     HEADSHOT_COINS: 10,
+    // Granada: el daño baja con la distancia al centro de la explosion
+    GRENADE: {
+      price: 30,
+      max: 2, // cuantas podes llevar
+      fuse: 2000, // ms hasta explotar
+      radius: 230, // alcance de la explosion
+      maxDmg: 110, // daño en el centro (mata)
+      minDmg: 10, // daño en el borde
+      throwSpeed: 620,
+      gravity: 900,
+      cooldown: 700, // ms entre tiros
+    },
     spawns: {
       red: { x: 60, y: 450, w: 200, h: 500 },
       blue: { x: W - 260, y: 450, w: 200, h: 500 },

@@ -44,6 +44,49 @@
       background: #f2c94c; color: #1a1a1a; cursor: pointer;
     }
     .hint { margin-top: 14px; font-size: 13px; opacity: .55; line-height: 1.4; }
+    /* Menu de inicio en dos columnas (en el celular horizontal entra todo) */
+    #menu { overflow-y: auto; align-items: safe center; }
+    .card.wide { max-width: 760px; }
+    .card.wide h1 { font-size: 32px; margin-bottom: 10px; }
+    .menuCols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; text-align: left; }
+    .step { font-size: 13px; font-weight: 700; color: #f2c94c; margin-bottom: 6px; }
+    .menuCols .teams { margin: 10px 0 0; }
+    .menuCols .hint { margin-top: 10px; font-size: 12px; }
+    .mmodes { display: flex; gap: 8px; }
+    .mmode {
+      flex: 1; text-align: left; padding: 10px; border-radius: 12px; border: 2px solid #2b3445; background: #1a202b;
+      color: #fff; cursor: pointer; display: flex; flex-direction: column; gap: 4px; opacity: .65;
+    }
+    .mmode b { font-size: 16px; }
+    .mmode span { font-size: 11px; opacity: .75; line-height: 1.3; }
+    .mmode.sel { border-color: #f2c94c; opacity: 1; background: #2a2614; }
+    .mmins { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
+    .mmins button { width: 40px; height: 36px; border-radius: 10px; border: 1px solid #3a4356; background: #1a202b; color: #fff; font-size: 18px; cursor: pointer; }
+    .mmins b { min-width: 28px; text-align: center; font-size: 20px; }
+    .mmins small { opacity: .5; }
+    .lobby { font-size: 12px; line-height: 1.4; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.06); margin-bottom: 10px; }
+    .chars { display: flex; gap: 8px; margin-top: 10px; }
+    .char {
+      flex: 1; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 12px; cursor: pointer;
+      border: 2px solid #2b3445; background: #1a202b; color: #fff; text-align: left; opacity: .65;
+    }
+    .char.sel { border-color: #f2c94c; opacity: 1; background: #2a2614; }
+    .char .imgs { display: flex; flex-shrink: 0; }
+    .char img { height: 74px; width: auto; display: block; }
+    .char b { display: block; font-size: 15px; }
+    .char span { display: block; font-size: 11px; opacity: .75; line-height: 1.25; }
+    @media (max-height: 430px) {
+      .char img { height: 58px; }
+      .card.wide h1 { font-size: 22px; margin-bottom: 4px; }
+      .menuCols { gap: 12px; }
+      .menuCols .hint { display: none; }
+      .mmode span { font-size: 10px; }
+      #play { padding: 12px; font-size: 18px; }
+    }
+    #playNew {
+      width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; font-weight: 700; border-radius: 12px;
+      border: 2px solid #f2c94c; background: transparent; color: #f2c94c; cursor: pointer;
+    }
     #rotate { display: none; z-index: 20; flex-direction: column; gap: 10px; font-size: 20px; }
     #rotate .icon { font-size: 54px; animation: spin 2s ease-in-out infinite; }
     @keyframes spin { 0%,30% { transform: rotate(0); } 60%,100% { transform: rotate(90deg); } }
@@ -112,24 +155,41 @@
   <canvas id="hud"></canvas>
 
   <div class="overlay" id="menu">
-    <div class="card">
+    <div class="card wide">
       <h1><span class="r">ROJO</span> vs <span class="b">AZUL</span></h1>
-      <p class="sub">Shooter por equipos</p>
-      <input id="name" maxlength="14" placeholder="Tu nombre" autocomplete="off">
-      <div class="teams">
-        <button id="tRed" data-team="red">Rojo</button>
-        <button id="tAuto" data-team="auto" class="sel">Auto</button>
-        <button id="tBlue" data-team="blue">Azul</button>
-      </div>
-      <label class="sensRow">Sensibilidad de giro: <b class="sensVal">5</b>
-        <input type="range" class="sens" min="1" max="10" step="1" value="5">
-      </label>
-      <button id="play">JUGAR</button>
-      <div class="hint">
-        Celular: analógico izquierdo para moverte (también de costado).
-        Botón rojo para disparar: arrastralo para apuntar mientras disparás.
-        También podés arrastrar en la mitad derecha para girar la vista.<br>
-        PC: WASD para moverte, mouse para mirar (click para capturarlo), click o espacio para disparar.
+      <div class="menuCols">
+        <div>
+          <div class="step">1 · Tu jugador</div>
+          <input id="name" maxlength="14" placeholder="Tu nombre" autocomplete="off">
+          <div class="teams">
+            <button id="tRed" data-team="red">Rojo</button>
+            <button id="tAuto" data-team="auto" class="sel">Auto</button>
+            <button id="tBlue" data-team="blue">Azul</button>
+          </div>
+          <div class="chars" id="chars">
+            <button class="char sel" data-s="0"></button>
+            <button class="char" data-s="1"></button>
+          </div>
+          <div class="hint">
+            Celular: analógico izquierdo para moverte; botón rojo para disparar (arrastralo para apuntar); 💣 tira granada.<br>
+            PC: WASD, mouse para mirar, click/espacio dispara, G granada, B tienda.
+          </div>
+        </div>
+        <div>
+          <div class="step">2 · Modo de juego</div>
+          <div class="mmodes">
+            <button class="mmode sel" data-mode="tdm"><b>Reaparición</b><span>Reaparecés a los 3 s. Gana el equipo con más bajas al terminar el tiempo.</span></button>
+            <button class="mmode" data-mode="elim"><b>Eliminación</b><span>Sin reaparecer. Gana la ronda quien elimina a todos; gana quien gane más rondas.</span></button>
+          </div>
+          <div class="mmins">
+            <span>Minutos</span>
+            <button id="mMinLess">−</button><b id="mMinVal">5</b><button id="mMinMore">+</button>
+            <small>máx. 15</small>
+          </div>
+          <div id="lobbyInfo" class="lobby">Conectando…</div>
+          <button id="play">JUGAR</button>
+          <button id="playNew" style="display:none">Empezar una nueva con mi modo</button>
+        </div>
       </div>
     </div>
   </div>
