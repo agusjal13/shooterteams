@@ -63,7 +63,7 @@
     const pts = horizontal
       ? [[x + 30, y - 1, 'y'], [x + 120, y - 1, 'y'], [x + 30, y + h + 1, 'y'], [x + 120, y + h + 1, 'y']]
       : [[x - 1, y + 30, 'x'], [x - 1, y + 120, 'x'], [x + w + 1, y + 30, 'x'], [x + w + 1, y + 120, 'x']];
-    for (const [px, py, axis] of pts) deco.push({ t: 'wheel', x: px, y: py, r: 12, axis });
+    for (const [px, py, axis] of pts) deco.push({ t: 'wheel', x: px, y: py, r: 12, axis, car: true });
     return { walls, deco };
   }
 
@@ -167,8 +167,8 @@
     const L = { walls: [], ramps: [], deco: [] }; // mitad izquierda (se espeja)
     // estanterias altas (forman pasillos)
     L.walls.push(
-      { x: 360, y: 90, w: 50, h: 380, z: 175, k: 'rack' },
-      { x: 360, y: 1130, w: 50, h: 380, z: 175, k: 'rack' },
+      { x: 360, y: 130, w: 50, h: 340, z: 175, k: 'rack' },
+      { x: 360, y: 1130, w: 50, h: 340, z: 175, k: 'rack' },
       { x: 520, y: 150, w: 330, h: 44, z: 175, k: 'rack' },
       { x: 520, y: 320, w: 330, h: 44, z: 175, k: 'rack' },
       { x: 520, y: 1236, w: 330, h: 44, z: 175, k: 'rack' },
@@ -187,8 +187,8 @@
     merge(L, forklift(1000, 760, 'e'));
     // tabiques que arman los pasillos del centro
     L.walls.push(
-      { x: 1110, y: 0, w: 30, h: 440, z: 170, k: 'partition' },
-      { x: 1110, y: 1160, w: 30, h: 440, z: 170, k: 'partition' },
+      { x: 1110, y: 130, w: 30, h: 310, z: 170, k: 'partition' },
+      { x: 1110, y: 1160, w: 30, h: 310, z: 170, k: 'partition' },
     );
     // lineas pintadas en el piso
     L.deco.push(
@@ -204,25 +204,48 @@
       { x: 1240, y: 920, w: 120, h: 120, z: 95, k: 'crate' },
       { x: 1260, y: 760, w: 80, h: 80, z: 48, k: 'pallet' },
     );
-    for (const top of [true, false]) {
-      const py = top ? 0 : H - 160; // pegado a la pared del fondo
-      m.walls.push({ x: 1140, y: py, w: 320, h: 160, z: 95, k: 'platform' });
-      // baranda con hueco en el medio para la escalera
-      const ry = top ? py + 160 - 5 : py;
+    // Balcon elevado que da toda la vuelta al galpon (se puede caminar por debajo).
+    // Se sube por las escaleras del medio (arriba y abajo).
+    const BW = 110, BZ = 110, BZB = 100; // ancho, altura del piso del balcon y de su parte de abajo
+    m.walls.push(
+      { x: 0, y: 0, w: W, h: BW, z: BZ, zb: BZB, k: 'balcony' },
+      { x: 0, y: H - BW, w: W, h: BW, z: BZ, zb: BZB, k: 'balcony' },
+      { x: 0, y: BW, w: BW, h: H - 2 * BW, z: BZ, zb: BZB, k: 'balcony' },
+      { x: W - BW, y: BW, w: BW, h: H - 2 * BW, z: BZ, zb: BZB, k: 'balcony' },
+    );
+    // baranda del lado de adentro, con hueco donde llegan las escaleras
+    const RZ = BZ + 28, T = 5;
+    const SX0 = 1250, SX1 = 1350;
+    for (const ry of [BW - T, H - BW]) {
       m.walls.push(
-        { x: 1140, y: ry, w: 110, h: 5, z: 123, k: 'railing' },
-        { x: 1350, y: ry, w: 110, h: 5, z: 123, k: 'railing' },
+        { x: BW, y: ry, w: SX0 - BW, h: T, z: RZ, zb: BZ, k: 'railing' },
+        { x: SX1, y: ry, w: W - BW - SX1, h: T, z: RZ, zb: BZ, k: 'railing' },
       );
-      m.ramps.push(top
-        ? { x: 1250, y: py + 160, w: 100, h: 190, top: 95, axis: 'y', dir: -1 }
-        : { x: 1250, y: py - 190, w: 100, h: 190, top: 95, axis: 'y', dir: 1 });
     }
+    m.walls.push(
+      { x: BW - T, y: BW, w: T, h: H - 2 * BW, z: RZ, zb: BZ, k: 'railing' },
+      { x: W - BW, y: BW, w: T, h: H - 2 * BW, z: RZ, zb: BZ, k: 'railing' },
+    );
+    // columnas que sostienen el balcon
+    for (const x of [300, 700, 1000, 1600, 1900, 2300]) {
+      m.walls.push({ x: x - 10, y: BW - 22, w: 20, h: 20, z: BZB, k: 'pillar' });
+      m.walls.push({ x: x - 10, y: H - BW + 2, w: 20, h: 20, z: BZB, k: 'pillar' });
+    }
+    for (const y of [330, 1270]) {
+      m.walls.push({ x: BW - 22, y: y - 10, w: 20, h: 20, z: BZB, k: 'pillar' });
+      m.walls.push({ x: W - BW + 2, y: y - 10, w: 20, h: 20, z: BZB, k: 'pillar' });
+    }
+    // escaleras del medio
+    m.ramps.push(
+      { x: SX0, y: BW, w: SX1 - SX0, h: 220, top: BZ, axis: 'y', dir: -1 },
+      { x: SX0, y: H - BW - 220, w: SX1 - SX0, h: 220, top: BZ, axis: 'y', dir: 1 },
+    );
     // luces del techo
     for (let x = 300; x < W; x += 500) for (let y = 250; y < H; y += 550) m.deco.push({ t: 'light', x, y, w: 260, h: 26 });
     m.deco.push({ t: 'paint', x: 1220, y: 700, w: 160, h: 6, c: 0xffffff }, { t: 'paint', x: 1220, y: 894, w: 160, h: 6, c: 0xffffff });
 
     return {
-      id: 'warehouse', name: 'Galpón', desc: 'Depósito techado: pasillos, camiones, mulas y entrepisos.',
+      id: 'warehouse', name: 'Galpón', desc: 'Depósito techado: pasillos, camiones, mulas y un balcón alrededor.',
       W, H, ...m, theme: 'warehouse',
       spawns: { red: { x: 60, y: 560, w: 200, h: 480 }, blue: { x: W - 260, y: 560, w: 200, h: 480 } },
     };
@@ -317,6 +340,12 @@
     }
   }
 
+  // Un objeto puede estar elevado (zb = altura de abajo, ej. un balcon): se puede pasar por debajo.
+  const BODY_H = 90; // alto del cuerpo (para saber si alguien entra debajo de algo)
+  const bottom = (w) => w.zb || 0;
+  // ¿la pared w le corta el paso a alguien parado a altura z?
+  const blocksAt = (w, z) => w.z > z + STEP && bottom(w) < z + BODY_H;
+
   // Piso mas alto alcanzable debajo de (x, y) para alguien que esta a altura z
   function groundAt(x, y, z) {
     let g = 0;
@@ -336,7 +365,7 @@
   function resolve(p, R, dt) {
     const z = p.z || 0;
     for (const w of MAP.walls) {
-      if (w.z > z + STEP) pushOut(p, R, w.x, w.y, w.x + w.w, w.y + w.h);
+      if (blocksAt(w, z)) pushOut(p, R, w.x, w.y, w.x + w.w, w.y + w.h);
     }
     for (const r of MAP.ramps) {
       const cx = clamp(p.x, r.x, r.x + r.w), cy = clamp(p.y, r.y, r.y + r.h);
@@ -351,7 +380,7 @@
   // ¿Hay algo solido en este punto? (para balas y granadas)
   function solidAt(x, y, z) {
     for (const w of MAP.walls) {
-      if (z < w.z && x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
+      if (z < w.z && z >= bottom(w) && x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
     }
     for (const r of MAP.ramps) {
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h && z < rampH(r, x, y)) return true;
@@ -362,7 +391,7 @@
   // ¿Un jugador a altura z choca con algo si se para en (x, y)?
   function blocked(x, y, z, R) {
     for (const w of MAP.walls) {
-      if (w.z <= z + STEP) continue;
+      if (!blocksAt(w, z)) continue;
       const cx = clamp(x, w.x, w.x + w.w), cy = clamp(y, w.y, w.y + w.h);
       if ((x - cx) ** 2 + (y - cy) ** 2 < R * R) return true;
     }

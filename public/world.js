@@ -262,6 +262,8 @@ function materialFor(w) {
     case 'partition': return [lam('partition', { map: TEX.concrete(), color: 0xc4c8cc }), 120];
     case 'platform': return [lam('platform', { map: TEX.grate() }), 48];
     case 'railing': return [lam('railing', { color: 0xf2c94c }), 'fit'];
+    case 'balcony': return [lam('platform', { map: TEX.grate() }), 48];
+    case 'pillar': return [lam('pillar', { color: 0x4a5059 }), 'fit'];
     case 'building': {
       const side = lam('facade' + c, { map: TEX.facade(), color: c });
       const top = lam('roof', { map: TEX.gravel() });
@@ -279,6 +281,137 @@ function materialFor(w) {
     case 'fountain': return [lam('fountain', { map: TEX.stone() }), 60];
     case 'kiosk': return [lam('kiosk' + c, { map: TEX.planks(), color: c }), 60];
     default: return [lam('default', { color: 0x999999 }), 'fit'];
+  }
+}
+
+// ---------- Autos con forma real ----------
+// Silueta lateral de un sedan (largo 150, alto 64): paragolpes, baul, luneta, techo, parabrisas, capo.
+const CAR_PROFILE = [[0, 14], [0, 33], [4, 39], [32, 42], [46, 61], [95, 63], [117, 45], [145, 40], [150, 33], [150, 14]];
+const CAR_SIDE_WINDOW = [[38, 44], [49, 59], [93, 60.5], [112, 46]];
+const paintCache = {};
+function carPaint(c) {
+  if (!paintCache[c]) paintCache[c] = new THREE.MeshPhongMaterial({ color: c, shininess: 90, specular: 0x666666 });
+  return paintCache[c];
+}
+const glassMat = () => paintCache.glass || (paintCache.glass = new THREE.MeshPhongMaterial({
+  color: 0x1d2a38, shininess: 120, specular: 0x8899aa, side: THREE.DoubleSide,
+}));
+const chromeMat = () => paintCache.chrome || (paintCache.chrome = new THREE.MeshPhongMaterial({ color: 0xcfd4da, shininess: 120, specular: 0xffffff }));
+
+function carModel(parent, w) {
+  const horizontal = w.w >= w.h;
+  const L = horizontal ? w.w : w.h;
+  const Wd = horizontal ? w.h : w.w;
+  const sx = L / 150;
+  const car = new THREE.Group();
+  const half = Wd / 2;
+
+  // carroceria: silueta extruida a lo ancho, con bordes redondeados
+  const shape = new THREE.Shape();
+  CAR_PROFILE.forEach(([x, y], i) => (i ? shape.lineTo(x * sx, y) : shape.moveTo(x * sx, y)));
+  const depth = Wd - 8;
+  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 4, bevelSize: 3, bevelSegments: 3 });
+  bodyGeo.translate(-L / 2, 0, -depth / 2);
+  car.add(new THREE.Mesh(bodyGeo, carPaint(w.c ?? 0xc0392b)));
+
+  // vidrios laterales (un poco por fuera de la chapa)
+  const winShape = new THREE.Shape();
+  CAR_SIDE_WINDOW.forEach(([x, y], i) => (i ? winShape.lineTo(x * sx, y) : winShape.moveTo(x * sx, y)));
+  const winGeo = new THREE.ShapeGeometry(winShape);
+  winGeo.translate(-L / 2, 0, 0);
+  for (const s of [1, -1]) {
+    const win = new THREE.Mesh(winGeo, glassMat());
+    win.position.z = s * (half + 0.4);
+    car.add(win);
+  }
+  // parabrisas y luneta: planos apoyados sobre las partes inclinadas
+  // (los puntos van en el orden que deja la cara "de afuera" mirando hacia arriba)
+  const slopePlane = (x0, y0, x1, y1) => {
+    const dx = (x1 - x0) * sx, dy = y1 - y0;
+    const ang = Math.atan2(dy, dx);
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(Math.hypot(dx, dy) * 0.86, Wd - 12), glassMat());
+    p.rotation.x = -Math.PI / 2; // acostado, mirando hacia arriba
+    const grp = new THREE.Group();
+    grp.add(p);
+    grp.rotation.z = ang; // inclinado como la chapa
+    const nx = -Math.sin(ang), ny = Math.cos(ang); // normal hacia afuera
+    // 4.5 = el redondeo de la chapa (3) + un poquito, asi el vidrio queda por fuera
+    grp.position.set(((x0 + x1) / 2) * sx - L / 2 + nx * 4.5, (y0 + y1) / 2 + ny * 4.5, 0);
+    car.add(grp);
+  };
+  slopePlane(95, 63, 117, 45); // parabrisas
+  slopePlane(32, 42, 46, 61); // luneta
+  // paragolpes y zocalo oscuros
+  const trim = lam('carTrim', { color: 0x202326 });
+  for (const [x, len] of [[-L / 2 - 1, 8], [L / 2 + 1, 8]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(len, 9, Wd - 2), trim);
+    b.position.set(x, 17, 0);
+    car.add(b);
+  }
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(L * 0.62, 5, Wd + 1), trim);
+  sill.position.set(-L * 0.02, 15, 0);
+  car.add(sill);
+  // faros y luces traseras
+  const head = new THREE.MeshBasicMaterial({ color: 0xfff6d6 });
+  const tail = new THREE.MeshBasicMaterial({ color: 0xd61f2c });
+  for (const s of [1, -1]) {
+    const h = new THREE.Mesh(new THREE.BoxGeometry(3, 6, 14), head);
+    h.position.set(L / 2 + 0.8, 35, s * (half - 12));
+    car.add(h);
+    const t = new THREE.Mesh(new THREE.BoxGeometry(3, 6, 14), tail);
+    t.position.set(-L / 2 - 0.8, 35, s * (half - 12));
+    car.add(t);
+    // espejos
+    const mirror = new THREE.Mesh(new THREE.BoxGeometry(6, 5, 6), carPaint(w.c ?? 0xc0392b));
+    mirror.position.set(L / 2 - 38 * sx, 46, s * (half + 3));
+    car.add(mirror);
+  }
+  // parrilla y patente
+  const grill = new THREE.Mesh(new THREE.BoxGeometry(2, 7, Wd * 0.45), trim);
+  grill.position.set(L / 2 + 1.2, 27, 0);
+  car.add(grill);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(1.5, 6, 18), new THREE.MeshBasicMaterial({ color: 0xf2f2f2 }));
+  plate.position.set(-L / 2 - 1.5, 24, 0);
+  car.add(plate);
+  // ruedas con llanta
+  const tireGeo = new THREE.CylinderGeometry(12, 12, 10, 18);
+  const rimGeo = new THREE.CylinderGeometry(7, 7, 10.6, 12);
+  for (const x of [-L / 2 + 30 * sx, L / 2 - 28 * sx]) {
+    for (const s of [1, -1]) {
+      const tire = new THREE.Mesh(tireGeo, lam('tire', { color: 0x1b1b1b }));
+      tire.rotation.x = Math.PI / 2;
+      tire.position.set(x, 12, s * (half - 4));
+      car.add(tire);
+      const rim = new THREE.Mesh(rimGeo, chromeMat());
+      rim.rotation.x = Math.PI / 2;
+      rim.position.set(x, 12, s * (half - 4));
+      car.add(rim);
+    }
+  }
+
+  car.position.set(w.x + w.w / 2, 0, w.y + w.h / 2);
+  if (!horizontal) car.rotation.y = -Math.PI / 2;
+  parent.add(car);
+}
+
+// ---------- Baranda: pasamanos, barra del medio y parantes (se ve a traves) ----------
+function railingModel(parent, w) {
+  const mat = lam('railing', { color: 0xf2c94c });
+  const zb = w.zb || 0, H = w.z - zb;
+  const along = w.w >= w.h; // la baranda corre a lo largo de x o de y
+  const len = along ? w.w : w.h;
+  const cx = w.x + w.w / 2, cy = w.y + w.h / 2;
+  for (const [hy, th] of [[H - 2, 4], [H * 0.5, 3]]) {
+    const bar = new THREE.Mesh(along ? new THREE.BoxGeometry(len, th, 4) : new THREE.BoxGeometry(4, th, len), mat);
+    bar.position.set(cx, zb + hy, cy);
+    parent.add(bar);
+  }
+  const n = Math.max(1, Math.round(len / 60));
+  for (let i = 0; i <= n; i++) {
+    const t = (i / n) * len;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(4, H, 4), mat);
+    post.position.set(along ? w.x + t : cx, zb + H / 2, along ? cy : w.y + t);
+    parent.add(post);
   }
 }
 
@@ -312,6 +445,7 @@ export function createWorld(scene, hemi, sun, teamHex) {
   function addDeco(g, d, MAP, th) {
     switch (d.t) {
       case 'wheel': {
+        if (d.car) break; // las ruedas de los autos las dibuja carModel
         const m = new THREE.Mesh(new THREE.CylinderGeometry(d.r, d.r, 12, 14), lam('tire', { color: 0x1b1b1b }));
         if (d.axis === 'y') m.rotation.x = Math.PI / 2; else m.rotation.z = Math.PI / 2;
         m.position.set(d.x, d.r, d.y);
@@ -447,8 +581,12 @@ export function createWorld(scene, hemi, sun, teamHex) {
 
     // paredes y objetos solidos
     for (const w of MAP.walls) {
+      if (w.k === 'carTop') continue; // el auto se dibuja entero con carModel
+      if (w.k === 'car') { carModel(group, w); continue; }
+      if (w.k === 'railing') { railingModel(group, w); continue; }
       const [mat, tile] = materialFor(w);
-      box(group, w.x, w.y, w.w, w.h, 0, w.z, mat, tile);
+      const zb = w.zb || 0; // objetos elevados (balcon, baranda del balcon)
+      box(group, w.x, w.y, w.w, w.h, zb, w.z - zb, mat, tile);
       // detalles extra
       if (w.k === 'planter') {
         const plants = new THREE.Mesh(new THREE.BoxGeometry(w.w - 8, 14, w.h - 8), lam('plants', { color: 0x4f8a3c }));
