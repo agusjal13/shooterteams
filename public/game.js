@@ -519,6 +519,8 @@ socket.on('welcome', (d) => {
     notices.push({ msg: `🔒 Sala privada · código ${myRoom.c} · pasáselo a tus amigos`, at: performance.now() });
   }
 });
+// el servidor mide nuestra demora: le devolvemos el "ping" al instante
+socket.on('sp', (t) => socket.emit('sp2', t));
 socket.on('teamChanged', (d) => {
   pred.ok = false; // reaparece en la otra base
   if (joinData) joinData.team = d.team;
@@ -1432,6 +1434,13 @@ function drawMinimap(meP) {
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 1;
   ctx.strokeRect(x0, y0, mw, mh);
+  // demora de la conexion (verde: buena, amarilla: aceptable, roja: alta)
+  if (meP && meP.pg) {
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = meP.pg < 120 ? '#5ee07a' : meP.pg < 220 ? '#f2c94c' : '#ff6b6b';
+    ctx.fillText(`${meP.pg} ms`, x0 + mw - 4, y0 + mh - 5);
+  }
 }
 
 function drawCrosshair(meP) {

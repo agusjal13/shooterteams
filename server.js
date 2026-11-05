@@ -30,6 +30,101 @@ const ASSIST_RANGE = 750;
 const GR = MAP.GRENADE;
 const CHEST = 48; // altura del pecho (para ver/apuntar a alguien)
 
+// ---- Compensacion de lag ----
+// Cada jugador ve a los demas un poco "en el pasado" (su demora de red + 100 ms de interpolacion).
+// Para que lo que ves sea lo que le pegas, los impactos se calculan contra donde estaban
+// los demas en ese momento ("rebobinando" un poco el tiempo).
+const INTERP_MS = 100; // lo mismo que usa el cliente para dibujar a los demas
+const MAX_REWIND = 300; // nunca se rebobina mas que esto (para que nadie con mucha demora tenga ventaja)
+const HIST_LEN = 24; // ~0.8 s de historial de posiciones (a 30 por segundo)
+
+function recordHistory(p, now) {
+  (p.hist || (p.hist = [])).push({ t: now, x: p.x, y: p.y, z: p.z || 0 });
+  if (p.hist.length > HIST_LEN) p.hist.shift();
+}
+
+// Donde estaba q en el momento t (interpolando entre dos registros)
+function posAt(q, t) {
+  const h = q.hist;
+  if (!h || !h.length || t >= h[h.length - 1].t) return q;
+  if (t <= h[0].t) return h[0];
+  for (let i = h.length - 1; i > 0; i--) {
+    const a = h[i - 1], b = h[i];
+    if (t >= a.t) {
+      const k = (t - a.t) / (b.t - a.t || 1);
+      return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, z: a.z + (b.z - a.z) * k };
+    }
+  }
+  return q;
+}
+
+// Cuanto rebobinar para los disparos de p
+const rewindFor = (p) => (p.isBot ? 0 : clamp((p.rtt || 0) / 2 + INTERP_MS + 1000 / TICK / 2, 0, MAX_REWIND));
+
+// ---- Limites contra abusos ----
+const MAX_ROOMS = 300;
+const MAX_HUMANS_PER_ROOM = 12;
+const CREATE_LIMIT = { n: 3, ms: 60000 }; // salas que puede crear alguien por minuto
+const JOIN_LIMIT = { n: 15, ms: 60000 }; // intentos de entrar a una sala por minuto
+const EVENT_RATE = 150; // mensajes por segundo que acepta el servidor de cada conexion
+
+// ¿Supero el limite? (cuenta las veces dentro de la ventana de tiempo)
+function overLimit(list, lim, now) {
+  while (list.length && now - list[0] > lim.ms) list.shift();
+  if (list.length >= lim.n) return true;
+  list.push(now);
+  return false;
+}
+
+// ---- Filtro de nombres ----
+// Se compara una version "normalizada" del nombre (sin tildes, sin numeros disfrazados de letras,
+// sin letras repetidas) contra una lista de palabras no permitidas.
+const BAD_WORDS = [
+  // castellano
+  'puto', 'puta', 'putit', 'pelotud', 'boludo', 'boluda', 'concha', 'conchud', 'forro', 'mierd', 'verga', 'pija', 'poronga',
+  'chot', 'trolo', 'trola', 'hdp', 'hijodeput', 'maricon', 'culia', 'culo', 'ort', 'cagon', 'pajer', 'garch', 'coger', 'cojer',
+  'sorete', 'mogolic', 'retrasad', 'idiota', 'imbecil', 'tarad', 'estupid', 'negr', 'prostitut', 'zorra', 'perra', 'pete',
+  'chupa', 'teta', 'sexo', 'porno', 'nazi', 'hitler', 'droga', 'cocain', 'faso', 'matar', 'violad', 'suicid',
+  // ingles
+  'fuck', 'fuk', 'shit', 'bitch', 'dick', 'cock', 'pussy', 'nigg', 'cunt', 'whore', 'slut', 'fag', 'porn', 'sex', 'rape',
+  'kill', 'penis', 'vagin',
+];
+// palabras que solo se bloquean si son la palabra entera (para no bloquear "Cortes", "Esperanza" o "Recoger")
+const BAD_EXACT_LIST = ['ort', 'culo', 'pete', 'chot', 'negr', 'kill', 'teta', 'faso', 'sex', 'fag', 'puto', 'puta', 'pija',
+  'perra', 'zorra', 'forro', 'coger', 'cojer', 'matar', 'chupa', 'droga', 'dick', 'rape'];
+const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', 8: 'b', '@': 'a', $: 's', '!': 'i', '|': 'l' };
+
+function normalizeName(s) {
+  return s.toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // sin tildes
+    .replace(/[01345780@$!|]/g, (c) => LEET[c] || c)
+    .replace(/(.)\1+/g, '$1'); // "puuuuto" -> "puto"
+}
+
+// la lista se normaliza igual que los nombres (asi "pussy" queda "pusy", igual que el nombre)
+const BAD_EXACT = new Set(BAD_EXACT_LIST.map(normalizeName));
+const BAD_SUB = [...new Set(BAD_WORDS.map(normalizeName))].filter((w) => !BAD_EXACT.has(w));
+
+function isBadName(name) {
+  // se revisan dos versiones: con los numeros como letras ("Put0") y sin numeros ("PUTO123")
+  const versions = [normalizeName(name), normalizeName(String(name).replace(/[0-9]+/g, ' '))];
+  for (const n of versions) {
+    const tokens = n.split(/[^a-zñ]+/).filter(Boolean);
+    const joined = tokens.join(''); // "p u t o" -> "puto"
+    for (const w of BAD_EXACT) if (tokens.includes(w) || joined === w) return true;
+    for (const w of BAD_SUB) if (joined.includes(w)) return true;
+  }
+  return false;
+}
+
+// Nombre limpio: si tiene algo no permitido, se reemplaza por uno generico
+function cleanName(raw) {
+  let name = String(raw || '').replace(/[<>]/g, '').trim().slice(0, 14);
+  if (!name) return { name: 'Jugador', changed: false };
+  if (isBadName(name)) return { name: 'Jugador ' + Math.floor(100 + Math.random() * 900), changed: true };
+  return { name, changed: false };
+}
+
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const angleDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 const teamName = (t) => (t === 'red' ? 'ROJO' : 'AZUL');
@@ -123,6 +218,7 @@ function spawn(R, p) {
   }
   p.z = 0;
   p.vz = 0;
+  p.hist = []; // aparece en otro lugar: el historial empieza de nuevo
   p.hp = 100;
   p.alive = true;
   p.a = p.team === 'red' ? 0 : Math.PI;
@@ -141,6 +237,7 @@ function setDead(p, respawnAt) {
 // Un jugador que entra en medio de una ronda de Guerra espera a la proxima.
 function placeNewPlayer(R, p) {
   spawn(R, p);
+  p.hist = [];
   if (R.match.mode === 'elim' && R.match.phase === 'playing') setDead(p, Infinity);
 }
 
@@ -545,16 +642,19 @@ function tryShoot(R, p, now) {
 
   // Ayuda de apuntado: si hay un enemigo visible cerca de la mira, apunta a el.
   if (!p.isBot) {
+    // apunta a donde el tirador VE al enemigo (posicion rebobinada), igual que el calculo del impacto
+    const back = now - rewindFor(p);
     let best = null;
     let bestD = Infinity;
     for (const id in R.players) {
       const q = R.players[id];
       if (!q.alive || q.team === p.team) continue;
-      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      const qp = posAt(q, back);
+      const d = Math.hypot(qp.x - p.x, qp.y - p.y);
       if (d > ASSIST_RANGE || d >= bestD) continue;
-      if (Math.abs(angleDiff(Math.atan2(q.y - p.y, q.x - p.x), a)) > ASSIST_ANGLE) continue;
-      if (!canSee(p, q)) continue;
-      best = q;
+      if (Math.abs(angleDiff(Math.atan2(qp.y - p.y, qp.x - p.x), a)) > ASSIST_ANGLE) continue;
+      if (!canSee(p, { x: qp.x, y: qp.y, z: qp.z })) continue;
+      best = qp;
       bestD = d;
     }
     if (best) a = Math.atan2(best.y - p.y, best.x - p.x);
@@ -578,6 +678,7 @@ function tryShoot(R, p, now) {
       id: ++R.bulletId, x: bx, y: by, z: bz,
       vx: Math.cos(ba) * hs, vy: Math.sin(ba) * hs, vz: Math.sin(bp) * wp.speed,
       owner: p.id, team: p.team, life: wp.life, dmg: wp.dmg,
+      rewind: rewindFor(p), // cuanto "en el pasado" estaba viendo el tirador a los demas
     });
   }
 }
@@ -633,6 +734,8 @@ function tickRoom(R, now) {
       resolve(a); resolve(b);
     }
   }
+  // historial de posiciones (para la compensacion de lag)
+  for (const p of vivos) recordHistory(p, now);
 
   // Disparos (en sub-pasos para no atravesar nada).
   const STEPS = 3;
@@ -650,9 +753,11 @@ function tickRoom(R, now) {
       for (const id in P) {
         const q = P[id];
         if (!q.alive || q.team === b.team) continue;
-        const rz = b.z - (q.z || 0); // altura del disparo respecto a los pies de q
+        // compensacion de lag: q se toma donde estaba cuando el tirador lo veia en su pantalla
+        const qp = b.rewind ? posAt(q, now - b.rewind) : q;
+        const rz = b.z - (qp.z || 0); // altura del disparo respecto a los pies de q
         if (rz < 0 || rz > MAP.TOP_Z) continue;
-        const d2 = (q.x - b.x) ** 2 + (q.y - b.y) ** 2;
+        const d2 = (qp.x - b.x) ** 2 + (qp.y - b.y) ** 2;
         const head = rz >= MAP.HEAD_Z;
         if (d2 > (head ? MAP.HEAD_R : P_R + 4) ** 2) continue; // la cabeza es mas angosta
         dead = true;
@@ -692,6 +797,7 @@ function tickRoom(R, now) {
       q: p.input.q || 0,
       bt: !!p.isBot,
       w: p.weapon, c: p.coins, o: p.owned, gr: p.grenades, sy: p.style,
+      pg: Math.round(p.rtt || 0), // demora (ping) en ms
     });
   }
   io.to(R.id).volatile.emit('state', {
@@ -748,12 +854,34 @@ io.on('connection', (socket) => {
     return { R, p };
   };
 
+  // Limite de mensajes por segundo (si alguien manda de mas, se ignoran los sobrantes)
+  let tokens = EVENT_RATE, lastRefill = Date.now();
+  socket.use((packet, next) => {
+    const now = Date.now();
+    tokens = Math.min(EVENT_RATE * 2, tokens + ((now - lastRefill) / 1000) * EVENT_RATE);
+    lastRefill = now;
+    if (tokens < 1) return; // se descarta
+    tokens--;
+    next();
+  });
+  socket.data.creates = [];
+  socket.data.joins = [];
+
+  // Medicion de la demora (ida y vuelta) de este jugador, para la compensacion de lag
+  socket.on('sp2', (t) => {
+    const { p } = here();
+    const rtt = Date.now() - Number(t);
+    if (p && rtt >= 0 && rtt < 3000) p.rtt = p.rtt ? p.rtt * 0.7 + rtt * 0.3 : rtt;
+  });
+
   socket.emit('rooms', publicRooms());
   socket.on('listRooms', () => socket.emit('rooms', publicRooms()));
 
   function enterRoom(R, data, creating) {
     data = data || {};
-    const name = String(data.name || '').trim().slice(0, 14) || 'Jugador';
+    const clean = cleanName(data.name);
+    const name = clean.name;
+    if (clean.changed) socket.emit('notice', `🚫 Ese nombre no está permitido. Te pusimos "${name}".`);
     let team = data.team;
     if (team !== 'red' && team !== 'blue') {
       const c = teamCounts(R);
@@ -775,7 +903,9 @@ io.on('connection', (socket) => {
   socket.on('createRoom', (data) => {
     if (here().R) return;
     data = data || {};
-    const name = String(data.name || '').trim().slice(0, 14) || 'Jugador';
+    if (Object.keys(rooms).length >= MAX_ROOMS) { socket.emit('joinError', 'Hay demasiadas salas abiertas. Probá unirte a una o esperá un rato.'); return; }
+    if (overLimit(socket.data.creates, CREATE_LIMIT, Date.now())) { socket.emit('joinError', 'Creaste muchas salas seguidas. Esperá un minuto.'); return; }
+    const name = cleanName(data.name).name;
     const R = createRoom({ name: `Sala de ${name}`, isPublic: data.public !== false, map: data.map });
     startMatch(R, data.mode, data.minutes, data.map);
     enterRoom(R, data, true);
@@ -786,9 +916,11 @@ io.on('connection', (socket) => {
   socket.on('joinRoom', (data) => {
     if (here().R) return;
     data = data || {};
-    const code = String(data.code || '').trim().toUpperCase();
+    if (overLimit(socket.data.joins, JOIN_LIMIT, Date.now())) { socket.emit('joinError', 'Demasiados intentos. Esperá un minuto.'); return; }
+    const code = String(data.code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
     const R = rooms[code];
     if (!R) { socket.emit('joinError', `No existe ninguna sala con el código ${code || '(vacío)'}`); return; }
+    if (humanCount(R) >= MAX_HUMANS_PER_ROOM) { socket.emit('joinError', `La sala ${code} está llena (máximo ${MAX_HUMANS_PER_ROOM} personas).`); return; }
     enterRoom(R, data, false);
   });
 
@@ -932,7 +1064,14 @@ setInterval(() => {
 }, 1000 / TICK);
 
 setInterval(() => {
-  for (const id in rooms) { useMap(rooms[id]); balanceTeams(rooms[id]); } // control extra por si algo quedo desparejo
+  const now = Date.now();
+  for (const id in rooms) {
+    const R = rooms[id];
+    useMap(R);
+    balanceTeams(R); // control extra por si algo quedo desparejo
+    // "ping" a cada persona para medir su demora (el celular lo devuelve enseguida)
+    for (const pid in R.players) if (!R.players[pid].isBot) io.to(pid).emit('sp', now);
+  }
   io.emit('rooms', publicRooms()); // la lista de salas publicas, para el menu
 }, 2000);
 
