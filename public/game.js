@@ -1,4 +1,5 @@
 import * as THREE from '/vendor/three/three.module.js';
+import { createWorld, minimapColor } from './world.js';
 
 const socket = io();
 const hud = document.getElementById('hud');
@@ -31,7 +32,7 @@ let myHitAt = 0;
 let W = 0, H = 0, dpr = 1;
 
 // Prediccion local
-const pred = { x: 0, y: 0, ok: false };
+const pred = { x: 0, y: 0, z: 0, ok: false };
 let seq = 0;
 const hist = [];
 let lastFrame = performance.now();
@@ -65,11 +66,12 @@ document.querySelectorAll('.teams button').forEach((b) => {
 // Menu paso a paso: 1) nombre y equipo, 2) personaje, 3) modo de juego
 let wizStep = 1;
 function showStep(n) {
-  wizStep = Math.max(1, Math.min(3, n));
+  wizStep = Math.max(1, Math.min(4, n));
   document.querySelectorAll('.wstep').forEach((s) => { s.hidden = +s.dataset.step !== wizStep; });
   document.querySelectorAll('.dots i').forEach((d, i) => d.classList.toggle('on', i < wizStep));
   if (wizStep === 2) refreshChars();
-  if (wizStep === 3) refreshLobby();
+  if (wizStep === 3) refreshMaps();
+  if (wizStep === 4) refreshLobby();
 }
 document.querySelectorAll('.wstep .next').forEach((b) => { b.onclick = () => showStep(wizStep + 1); });
 document.querySelectorAll('.wstep .back').forEach((b) => { b.onclick = () => showStep(wizStep - 1); });
@@ -129,17 +131,62 @@ function refreshLobby() {
   const play = document.getElementById('play');
   const playNew = document.getElementById('playNew');
   if (!humans.length) {
-    info.textContent = `No hay nadie jugando: se empieza una partida de ${MODE_NAME[menuMode]} de ${menuMins} min.`;
+    info.textContent = `No hay nadie jugando: se empieza ${MODE_NAME[menuMode]} en ${MAP.MAPS[menuMap].name}, ${menuMins} min.`;
     play.textContent = 'JUGAR';
     playNew.style.display = 'none';
   } else {
     const m = state.m;
     const names = humans.map((p) => p.n).slice(0, 4).join(', ') + (humans.length > 4 ? '…' : '');
-    info.textContent = `Partida en curso: ${MODE_NAME[m.mo]} · quedan ${fmtTime(m.tl)} · ${humans.length} jugando (${names}).`;
+    const mapName = (MAP.MAPS[m.mp] || {}).name || '';
+    info.textContent = `Partida en curso: ${MODE_NAME[m.mo]} en ${mapName} · quedan ${fmtTime(m.tl)} · ${humans.length} jugando (${names}).`;
     play.textContent = 'UNIRME A ESTA PARTIDA';
-    playNew.textContent = `Empezar una nueva de ${MODE_NAME[menuMode]} (reinicia para todos)`;
+    playNew.textContent = `Empezar una nueva: ${MODE_NAME[menuMode]} en ${MAP.MAPS[menuMap].name} (reinicia para todos)`;
     playNew.style.display = 'block';
   }
+}
+
+// ---------- Mapas: tarjetas con un dibujo del plano visto desde arriba ----------
+let menuMap = 'desert';
+try { if (MAP.MAPS[localStorage.getItem('rva_map')]) menuMap = localStorage.getItem('rva_map'); } catch (e) {}
+const MAP_BG = { desert: '#d8b47c', warehouse: '#7d8288', town: '#4a4d52' };
+function mapThumb(id, wpx) {
+  const m = MAP.MAPS[id];
+  const c = document.createElement('canvas');
+  const hpx = Math.round((wpx * m.H) / m.W);
+  c.width = wpx * 2; c.height = hpx * 2;
+  const g = c.getContext('2d');
+  const k = (wpx * 2) / m.W;
+  g.fillStyle = MAP_BG[id] || '#555'; g.fillRect(0, 0, c.width, c.height);
+  for (const d of m.deco) if (d.t === 'floor') { g.fillStyle = 'rgba(255,255,255,0.18)'; g.fillRect(d.x * k, d.y * k, d.w * k, d.h * k); }
+  g.fillStyle = 'rgba(214,58,58,0.55)'; const r = m.spawns.red; g.fillRect(r.x * k, r.y * k, r.w * k, r.h * k);
+  g.fillStyle = 'rgba(46,111,209,0.55)'; const b = m.spawns.blue; g.fillRect(b.x * k, b.y * k, b.w * k, b.h * k);
+  for (const w of m.walls) {
+    g.fillStyle = w.c !== undefined && w.k !== 'container' ? '#' + w.c.toString(16).padStart(6, '0') : w.k === 'container' ? '#5f8fc4' : w.k === 'rack' ? '#2b2f36' : w.k === 'crate' || w.k === 'pallet' ? '#9b6a3a' : '#5a4630';
+    g.fillRect(w.x * k, w.y * k, Math.max(1, w.w * k), Math.max(1, w.h * k));
+  }
+  g.fillStyle = '#39ff14';
+  for (const rr of m.ramps) g.fillRect(rr.x * k, rr.y * k, rr.w * k, rr.h * k);
+  return c;
+}
+function refreshMaps() {
+  const box = document.getElementById('maps');
+  if (!box.children.length) {
+    for (const id of MAP.MAP_IDS) {
+      const m = MAP.MAPS[id];
+      const b = document.createElement('button');
+      b.className = 'mapc';
+      b.dataset.map = id;
+      b.appendChild(mapThumb(id, 140));
+      b.insertAdjacentHTML('beforeend', `<b>${m.name}</b><span>${m.desc}</span>`);
+      b.onclick = () => {
+        menuMap = id;
+        try { localStorage.setItem('rva_map', id); } catch (e) {}
+        refreshMaps();
+      };
+      box.appendChild(b);
+    }
+  }
+  box.querySelectorAll('.mapc').forEach((b) => b.classList.toggle('sel', b.dataset.map === menuMap));
 }
 
 function enterGame(startNew) {
@@ -149,8 +196,8 @@ function enterGame(startNew) {
     localStorage.setItem('rva_mode', menuMode);
     localStorage.setItem('rva_mins', menuMins);
   } catch (e) {}
-  // si no hay nadie, el servidor arranca la partida con este modo; si hay gente, solo con startNew
-  socket.emit('join', { name, team: chosenTeam, style: chosenStyle, mode: menuMode, minutes: menuMins, start: !!startNew });
+  // si no hay nadie, el servidor arranca la partida con este modo y mapa; si hay gente, solo con startNew
+  socket.emit('join', { name, team: chosenTeam, style: chosenStyle, mode: menuMode, minutes: menuMins, map: menuMap, start: !!startNew });
   joinData = { name, team: chosenTeam, style: chosenStyle }; // para reconectar sin reiniciar la partida
   menu.style.display = 'none';
   document.body.classList.add('playing');
@@ -172,7 +219,12 @@ function openModal(el) {
   el.classList.add('open');
   if (el === shop) renderShop(true);
 }
-document.getElementById('botsBtn').onclick = () => { syncMatchPanel(); openModal(botsPanel); };
+document.getElementById('botsBtn').onclick = () => {
+  // el formulario arranca con el mapa que se esta jugando
+  if (state && state.m && state.m.mp) { newMap = state.m.mp; refreshMatchForm(); }
+  syncMatchPanel();
+  openModal(botsPanel);
+};
 
 // Salir al menu principal
 const exitAsk = document.getElementById('exitAsk');
@@ -237,9 +289,19 @@ const MODE_INFO = {
 };
 let newMode = 'tdm';
 let newMins = 5;
+let newMap = 'desert';
 const minVal = document.getElementById('minVal');
+const pmaps = document.getElementById('pmaps');
+for (const id of MAP.MAP_IDS) {
+  const b = document.createElement('button');
+  b.dataset.map = id;
+  b.textContent = MAP.MAPS[id].name;
+  b.onclick = () => { b.blur(); newMap = id; refreshMatchForm(); };
+  pmaps.appendChild(b);
+}
 function refreshMatchForm() {
   botsPanel.querySelectorAll('.mode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === newMode));
+  pmaps.querySelectorAll('button').forEach((b) => b.classList.toggle('sel', b.dataset.map === newMap));
   document.getElementById('modeInfo').textContent = MODE_INFO[newMode];
   minVal.textContent = newMins;
 }
@@ -249,7 +311,7 @@ botsPanel.querySelectorAll('.mode').forEach((b) => {
 document.getElementById('minLess').onclick = () => { newMins = Math.max(1, newMins - 1); refreshMatchForm(); };
 document.getElementById('minMore').onclick = () => { newMins = Math.min(MAP.MAX_MINUTES, newMins + 1); refreshMatchForm(); };
 document.getElementById('startMatch').onclick = () => {
-  socket.emit('newMatch', { mode: newMode, minutes: newMins });
+  socket.emit('newMatch', { mode: newMode, minutes: newMins, map: newMap });
   botsPanel.classList.remove('open');
 };
 refreshMatchForm();
@@ -330,19 +392,26 @@ socket.on('welcome', (d) => {
   if (joinData) joinData.team = d.team;
 });
 socket.on('state', (s) => {
+  // Cambio de mapa: se arma el escenario nuevo
+  if (s.m && s.m.mp && s.m.mp !== MAP.id) {
+    MAP.setMap(s.m.mp);
+    world.build(MAP);
+    pred.ok = false;
+    for (const id in disp) disp[id].buf = [];
+  }
   state = s;
   stateAt = performance.now();
   for (const p of s.p) {
     let d = disp[p.id];
-    if (!d) d = disp[p.id] = { x: p.x, y: p.y, a: p.a, hp: p.hp, hitAt: 0, al: p.al };
+    if (!d) d = disp[p.id] = { x: p.x, y: p.y, z: p.z || 0, a: p.a, hp: p.hp, hitAt: 0, al: p.al };
     if (p.hp < d.hp && p.al) {
       d.hitAt = performance.now();
       if (p.id === myId) myHitAt = d.hitAt;
     }
     if (!p.al && d.al && p.id === myId) myHitAt = performance.now();
-    if (p.al && !d.al) { d.x = p.x; d.y = p.y; d.a = p.a; d.buf = []; }
+    if (p.al && !d.al) { d.x = p.x; d.y = p.y; d.z = p.z || 0; d.a = p.a; d.buf = []; }
     // historial de posiciones para interpolar suave entre actualizaciones
-    (d.buf || (d.buf = [])).push({ t: stateAt, x: p.x, y: p.y, a: p.a });
+    (d.buf || (d.buf = [])).push({ t: stateAt, x: p.x, y: p.y, z: p.z || 0, a: p.a });
     if (d.buf.length > 12) d.buf.shift();
     d.hp = p.hp;
     d.al = p.al;
@@ -379,10 +448,12 @@ function reconcile(mine, s) {
     if (mine.al && !pred.ok) { yaw = mine.a; pitch = 0; } // al reaparecer miro hacia el enemigo
     pred.x = mine.x;
     pred.y = mine.y;
+    pred.z = mine.z || 0;
     pred.ok = mine.al && !isFrozen(s);
     hist.length = 0;
     return;
   }
+  if (Math.abs((mine.z || 0) - (pred.z || 0)) > 45) pred.z = mine.z || 0; // altura muy distinta: corregir
   while (hist.length && hist[0].q < mine.q) hist.shift();
   const h = hist.length && hist[0].q === mine.q ? hist[0] : null;
   if (!h) {
@@ -584,83 +655,20 @@ try {
 }
 document.getElementById('gl').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-const SKY = 0x5f7fa8;
-scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 700, 2300);
 
-const camera = new THREE.PerspectiveCamera(70, 1, 1, 4000);
+const camera = new THREE.PerspectiveCamera(70, 1, 1, 5000);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
 
-scene.add(new THREE.HemisphereLight(0xdde8ff, 0x4a4f5a, 2.6));
+const hemi = new THREE.HemisphereLight(0xdde8ff, 0x4a4f5a, 2.6);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff4e0, 2.0);
 sun.position.set(0.6, 1, 0.35);
 scene.add(sun);
 
-// Suelo con grilla
-function gridTexture() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const g = c.getContext('2d');
-  g.fillStyle = '#3a4250';
-  g.fillRect(0, 0, 256, 256);
-  g.fillStyle = '#353c49';
-  g.fillRect(0, 0, 128, 128);
-  g.fillRect(128, 128, 128, 128);
-  g.strokeStyle = 'rgba(255,255,255,0.12)';
-  g.lineWidth = 3;
-  g.strokeRect(0, 0, 256, 256);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(MAP.W / 200, MAP.H / 200);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(MAP.W, MAP.H),
-  new THREE.MeshLambertMaterial({ map: gridTexture() })
-);
-floor.rotation.x = -Math.PI / 2;
-floor.position.set(MAP.W / 2, 0, MAP.H / 2);
-scene.add(floor);
-
-// Bases de cada equipo
-for (const t of ['red', 'blue']) {
-  const s = MAP.spawns[t];
-  const base = new THREE.Mesh(
-    new THREE.PlaneGeometry(s.w + 80, s.h + 80),
-    new THREE.MeshBasicMaterial({ color: TEAM_HEX[t], transparent: true, opacity: 0.22, depthWrite: false })
-  );
-  base.rotation.x = -Math.PI / 2;
-  base.position.set(s.x + s.w / 2, 0.5, s.y + s.h / 2);
-  scene.add(base);
-}
-
-// Paredes
-const wallMats = [0xb8a58a, 0x9fb0c4, 0xc49a6c, 0x8fa89a].map((c) => new THREE.MeshLambertMaterial({ color: c }));
-const edgeMat = new THREE.LineBasicMaterial({ color: 0x20252e });
-function addBox(x, y, w, h, height, mat) {
-  const geo = new THREE.BoxGeometry(w, height, h);
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x + w / 2, height / 2, y + h / 2);
-  scene.add(m);
-  const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat);
-  e.position.copy(m.position);
-  scene.add(e);
-}
-MAP.walls.forEach((w, i) => {
-  // cajas chicas mas bajas y color madera; el resto alterna colores
-  const small = w.w <= 100 && w.h <= 100;
-  addBox(w.x, w.y, w.w, w.h, w.z, small ? wallMats[2] : wallMats[i % 2 === 0 ? 0 : 1]);
-});
-// Muros del borde
-const borderMat = new THREE.MeshLambertMaterial({ color: 0x5b6475 });
-const B = 40, BH = 170;
-addBox(-B, -B, MAP.W + 2 * B, B, BH, borderMat);
-addBox(-B, MAP.H, MAP.W + 2 * B, B, BH, borderMat);
-addBox(-B, 0, B, MAP.H, BH, borderMat);
-addBox(MAP.W, 0, B, MAP.H, BH, borderMat);
+// El mapa (piso, paredes, objetos, escaleras) lo arma world.js segun el mapa activo
+const world = createWorld(scene, hemi, sun, TEAM_HEX);
+world.build(MAP);
 
 // Arma en primera persona
 const viewGun = new THREE.Group();
@@ -1056,9 +1064,9 @@ const lerpAngle = (a, b, t) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) 
 
 function update3D(now, meP, dt) {
   // Camara
-  const cam = meP ? (meP.al ? pred : disp[myId]) : { x: MAP.W / 2, y: MAP.H / 2 };
+  const cam = meP ? (meP.al ? pred : disp[myId]) : { x: MAP.W / 2, y: MAP.H / 2, z: 0 };
   const deadCam = meP && !meP.al;
-  camera.position.set(cam.x, deadCam ? 18 : EYE_H, cam.y);
+  camera.position.set(cam.x, (cam.z || 0) + (deadCam ? 18 : EYE_H), cam.y);
   camera.rotation.y = -yaw - Math.PI / 2;
   camera.rotation.x = deadCam ? 0 : pitch;
   camera.rotation.z = deadCam ? 0.35 : 0;
@@ -1078,7 +1086,7 @@ function update3D(now, meP, dt) {
     const d = disp[p.id];
     a.root.visible = p.al;
     if (!p.al) continue;
-    a.root.position.set(d.x, 0, d.y);
+    a.root.position.set(d.x, d.z || 0, d.y);
     a.body.rotation.y = -d.a;
     a.gun.rotation.z = p.pt || 0; // el arma sube/baja segun hacia donde apunta
     // caminar
@@ -1147,8 +1155,12 @@ function drawMinimap(meP) {
   const k = mw / MAP.W;
   ctx.fillStyle = 'rgba(10,14,20,0.7)';
   ctx.fillRect(x0, y0, mw, mh);
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  for (const w of MAP.walls) ctx.fillRect(x0 + w.x * k, y0 + w.y * k, Math.max(1, w.w * k), Math.max(1, w.h * k));
+  for (const w of MAP.walls) {
+    ctx.fillStyle = minimapColor(w);
+    ctx.fillRect(x0 + w.x * k, y0 + w.y * k, Math.max(1, w.w * k), Math.max(1, w.h * k));
+  }
+  ctx.fillStyle = 'rgba(120,255,140,0.45)'; // escaleras
+  for (const r of MAP.ramps) ctx.fillRect(x0 + r.x * k, y0 + r.y * k, Math.max(1, r.w * k), Math.max(1, r.h * k));
   for (const p of state.p) {
     if (!p.al || p.id === myId) continue;
     if (meP && p.t !== meP.t) continue; // solo compañeros
@@ -1489,11 +1501,12 @@ function frame() {
     const b1 = buf[i];
     const b0 = i > 0 ? buf[i - 1] : b1;
     if (renderT >= b1.t || b0 === b1) {
-      d.x = b1.x; d.y = b1.y; d.a = b1.a;
+      d.x = b1.x; d.y = b1.y; d.z = b1.z; d.a = b1.a;
     } else {
       const k = Math.max(0, Math.min(1, (renderT - b0.t) / (b1.t - b0.t)));
       d.x = b0.x + (b1.x - b0.x) * k;
       d.y = b0.y + (b1.y - b0.y) * k;
+      d.z = b0.z + (b1.z - b0.z) * k;
       d.a = lerpAngle(b0.a, b1.a, k);
     }
   }
@@ -1506,11 +1519,12 @@ function frame() {
     moving = mv.mx !== 0 || mv.my !== 0;
     pred.x += mv.mx * SPEED * dt;
     pred.y += mv.my * SPEED * dt;
-    MAP.resolve(pred, P_R);
+    MAP.resolve(pred, P_R, dt); // choca con paredes, sube escaleras y cae de los bordes
   }
   if (meP && disp[myId] && !meP.al) {
     disp[myId].x = meP.x;
     disp[myId].y = meP.y;
+    disp[myId].z = meP.z || 0;
   }
 
   update3D(now, meP, dt);

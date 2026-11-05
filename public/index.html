@@ -78,6 +78,18 @@
     .nav .next { background: #f2c94c; color: #1a1a1a; border: 0; }
     .nav .back { background: transparent; color: #fff; border: 2px solid #3a4356; flex: 0 0 auto; padding: 14px 18px; }
     .wizard .chars { margin-top: 0; }
+    /* Tarjetas de mapa (paso 3 del menu y panel de partida) */
+    .maps { display: flex; gap: 8px; }
+    .mapc {
+      flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 12px; cursor: pointer;
+      border: 2px solid #2b3445; background: #1a202b; color: #fff; text-align: left; opacity: .65; min-width: 0;
+    }
+    .mapc.sel { border-color: #f2c94c; opacity: 1; background: #2a2614 !important; color: #fff !important; }
+    .mapc canvas { position: static; inset: auto; width: 100%; height: auto; border-radius: 6px; display: block; }
+    .mapc b { font-size: 16px; }
+    .mapc span { font-size: 11px; opacity: .75; line-height: 1.25; }
+    .pmaps { display: flex; gap: 6px; margin-bottom: 6px; }
+    .pmaps button { flex: 1; padding: 8px 0; }
     .wizard .char.sel, .wizard .mmode.sel { background: #2a2614 !important; color: #fff !important; }
     .wizard .char { flex-direction: column; text-align: center; padding: 10px; }
     .wizard .char img { height: 130px; }
@@ -101,6 +113,8 @@
       .teams.big button { padding: 12px 0; }
       .nav { margin-top: 8px; }
       .nav button { padding: 10px; font-size: 15px; }
+      .mapc span { display: none; }
+      .mapc { padding: 6px; }
       .wstep .step { margin-bottom: 6px; }
       .wizard .mmode { padding: 7px 9px; }
       .wizard .mmins { margin: 6px 0; }
@@ -200,11 +214,11 @@
   <div class="overlay" id="menu">
     <div class="card wizard">
       <h1><span class="r">ROJO</span> vs <span class="b">AZUL</span></h1>
-      <div class="dots"><i class="on"></i><i></i><i></i></div>
+      <div class="dots"><i class="on"></i><i></i><i></i><i></i></div>
 
       <!-- Paso 1: nombre y equipo -->
       <section class="wstep" data-step="1">
-        <div class="step">Paso 1 de 3 · ¿Cómo te llamás y en qué equipo jugás?</div>
+        <div class="step">Paso 1 de 4 · ¿Cómo te llamás y en qué equipo jugás?</div>
         <input id="name" maxlength="14" placeholder="Tu nombre" autocomplete="off">
         <div class="teams big">
           <button id="tRed" data-team="red">Rojo</button>
@@ -216,7 +230,7 @@
 
       <!-- Paso 2: personaje -->
       <section class="wstep" data-step="2" hidden>
-        <div class="step">Paso 2 de 3 · Elegí tu personaje</div>
+        <div class="step">Paso 2 de 4 · Elegí tu personaje</div>
         <div class="chars" id="chars">
           <button class="char sel" data-s="0"></button>
           <button class="char" data-s="1"></button>
@@ -224,9 +238,16 @@
         <div class="nav"><button class="back">‹ Atrás</button><button class="next">Siguiente ›</button></div>
       </section>
 
-      <!-- Paso 3: modo de juego -->
+      <!-- Paso 3: mapa -->
       <section class="wstep" data-step="3" hidden>
-        <div class="step">Paso 3 de 3 · Modo de juego</div>
+        <div class="step">Paso 3 de 4 · Elegí el mapa</div>
+        <div class="maps" id="maps"></div>
+        <div class="nav"><button class="back">‹ Atrás</button><button class="next">Siguiente ›</button></div>
+      </section>
+
+      <!-- Paso 4: modo de juego -->
+      <section class="wstep" data-step="4" hidden>
+        <div class="step">Paso 4 de 4 · Modo de juego</div>
         <div class="mmodes">
           <button class="mmode sel" data-mode="tdm"><b>DeathMatch</b><span>Reaparecés a los 3 s. Gana el equipo con más bajas al terminar el tiempo.</span></button>
           <button class="mmode" data-mode="elim"><b>Guerra</b><span>Sin reaparecer. Gana la ronda quien elimina a todos; gana quien gane más rondas.</span></button>
@@ -265,6 +286,9 @@
       <div class="cols">
         <div>
           <h3>Nueva partida</h3>
+          <div class="lbl">Mapa</div>
+          <div class="pmaps" id="pmaps"></div>
+          <div class="lbl">Modo</div>
           <div class="row">
             <button class="mode sel" data-mode="tdm">DeathMatch</button>
             <button class="mode" data-mode="elim">Guerra</button>

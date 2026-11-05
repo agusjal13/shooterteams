@@ -55,48 +55,22 @@ const match = {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const angleDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 
-function pointInWall(x, y) {
-  for (const w of MAP.walls) {
-    if (x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
-  }
-  return false;
-}
+// Fisica con alturas (compartida con el cliente en map.js)
+const solidAt = (x, y, z) => MAP.solidAt(x, y, z);
+const CHEST = 48; // altura del pecho (para ver/apuntar a alguien)
+// ¿p ve a q? (de ojos a pecho, teniendo en cuenta pisos y paredes)
+const canSee = (p, q) => MAP.los(p.x, p.y, (p.z || 0) + MAP.EYE_H, q.x, q.y, (q.z || 0) + CHEST);
 
-// Igual que pointInWall pero teniendo en cuenta la altura (las balas pueden pasar por encima de cajas bajas).
-function pointInWall3(x, y, z) {
-  for (const w of MAP.walls) {
-    if (z < w.z && x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
-  }
-  return false;
-}
-
-function hitsWall(x, y, r) {
-  for (const w of MAP.walls) {
-    const cx = clamp(x, w.x, w.x + w.w);
-    const cy = clamp(y, w.y, w.y + w.h);
-    if ((x - cx) ** 2 + (y - cy) ** 2 < r * r) return true;
-  }
-  return false;
-}
-
-function lineOfSight(x1, y1, x2, y2) {
-  const n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 12);
-  for (let i = 1; i < n; i++) {
-    const t = i / n;
-    if (pointInWall(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)) return false;
-  }
-  return true;
-}
-
-const resolve = (p) => MAP.resolve(p, P_R);
+const resolve = (p) => MAP.resolve(p, P_R, DT);
 
 function spawn(p) {
   const s = MAP.spawns[p.team];
   for (let i = 0; i < 30; i++) {
     p.x = s.x + Math.random() * s.w;
     p.y = s.y + Math.random() * s.h;
-    if (!hitsWall(p.x, p.y, P_R)) break;
+    if (!MAP.blocked(p.x, p.y, 0, P_R)) break;
   }
+  p.z = 0;
   p.hp = 100;
   p.alive = true;
   p.a = p.team === 'red' ? 0 : Math.PI;
@@ -126,7 +100,7 @@ function newPlayer(id, name, team, isBot, style) {
   return {
     id, name, team, isBot: !!isBot,
     style: style === 1 ? 1 : 0, // personaje elegido (0 o 1 dentro de su equipo)
-    x: 0, y: 0, a: 0, hp: 100, alive: true,
+    x: 0, y: 0, z: 0, a: 0, hp: 100, alive: true,
     kills: 0, deaths: 0, lastShot: 0, respawnAt: 0, protectUntil: 0,
     coins: MAP.START_COINS, owned: 1, weapon: 0, // owned = armas compradas (bits)
     grenades: 0, lastThrow: 0,
@@ -145,8 +119,9 @@ function placeNewPlayer(p) {
 }
 
 // ---- Partida: inicio, rondas y final ----
-function startMatch(mode, minutes, creatorId) {
+function startMatch(mode, minutes, creatorId, mapId) {
   if (creatorId) match.creator = creatorId;
+  if (mapId && MAP.MAPS[mapId]) MAP.setMap(mapId); // si no se elige mapa, se sigue con el actual
   const now = Date.now();
   match.mode = mode === 'elim' ? 'elim' : 'tdm';
   match.minutes = clamp(Math.round(Number(minutes) || 5), 1, MAP.MAX_MINUTES);
@@ -245,11 +220,12 @@ function throwGrenade(p, now) {
   const aim = clamp(p.input.p || 0, -MAP.MAX_PITCH, MAP.MAX_PITCH) / MAP.MAX_PITCH; // -1..1
   const pitch = aim >= 0 ? 0.35 + aim * (Math.PI / 4 - 0.35) : 0.35 + aim * 0.55;
   const hs = Math.cos(pitch) * GR.throwSpeed;
+  const z0 = (p.z || 0) + MAP.EYE_H - 8;
   let x = p.x + Math.cos(a) * (P_R + 6);
   let y = p.y + Math.sin(a) * (P_R + 6);
-  if (pointInWall(x, y)) { x = p.x; y = p.y; }
+  if (solidAt(x, y, z0)) { x = p.x; y = p.y; }
   grenades.push({
-    id: ++grenadeId, x, y, z: MAP.EYE_H - 8,
+    id: ++grenadeId, x, y, z: z0,
     vx: Math.cos(a) * hs, vy: Math.sin(a) * hs, vz: Math.sin(pitch) * GR.throwSpeed,
     owner: p.id, team: p.team, explodeAt: now + GR.fuse,
   });
@@ -261,18 +237,22 @@ function updateGrenades(now) {
     // movimiento con gravedad y rebotes contra paredes y piso
     g.vz -= GR.gravity * DT;
     const nx = g.x + g.vx * DT;
-    if (nx < 0 || nx > MAP.W || pointInWall3(nx, g.y, g.z)) g.vx *= -0.45; else g.x = nx;
+    if (nx < 0 || nx > MAP.W || solidAt(nx, g.y, g.z)) g.vx *= -0.45; else g.x = nx;
     const ny = g.y + g.vy * DT;
-    if (ny < 0 || ny > MAP.H || pointInWall3(g.x, ny, g.z)) g.vy *= -0.45; else g.y = ny;
+    if (ny < 0 || ny > MAP.H || solidAt(g.x, ny, g.z)) g.vy *= -0.45; else g.y = ny;
     const nz = g.z + g.vz * DT;
     if (nz <= 4) {
       g.z = 4;
       g.vz = Math.abs(g.vz) > 60 ? -g.vz * 0.35 : 0;
       g.vx *= 0.7; g.vy *= 0.7; // friccion con el piso
-    } else if (pointInWall3(g.x, g.y, nz)) {
-      g.vz = 0; // cae arriba de una caja
+    } else if (g.vz < 0 && solidAt(g.x, g.y, nz)) {
+      // cae arriba de algo (caja, techo, escalera): rebota un poco y frena
+      g.vz = Math.abs(g.vz) > 60 ? -g.vz * 0.35 : 0;
       g.vx *= 0.7; g.vy *= 0.7;
+    } else if (g.vz > 0 && solidAt(g.x, g.y, nz)) {
+      g.vz = 0; // pego contra algo por arriba (ej. techo del galpon)
     } else g.z = nz;
+    if (g.z > 320) { g.z = 320; g.vz = Math.min(0, g.vz); }
 
     if (now >= g.explodeAt) explode(g, now);
     else keep.push(g);
@@ -286,9 +266,10 @@ function explode(g, now) {
   for (const id in players) {
     const q = players[id];
     if (!q.alive || q.team === g.team) continue; // no lastima a tu equipo
-    const d = Math.hypot(q.x - g.x, q.y - g.y, (45 - g.z) * 0.5);
+    const qz = (q.z || 0) + 45;
+    const d = Math.hypot(q.x - g.x, q.y - g.y, (qz - g.z) * 0.7);
     if (d > GR.radius) continue;
-    if (!lineOfSight(g.x, g.y, q.x, q.y)) continue; // las paredes cubren
+    if (!MAP.los(g.x, g.y, g.z + 10, q.x, q.y, qz)) continue; // las paredes y los pisos cubren
     if (now < q.protectUntil) continue;
     // daño segun la distancia: maximo en el centro, minimo en el borde
     const dmg = Math.round(GR.maxDmg - (GR.maxDmg - GR.minDmg) * (d / GR.radius));
@@ -426,7 +407,7 @@ function freeDirection(p, goal) {
     const x = p.x + Math.cos(a) * 45;
     const y = p.y + Math.sin(a) * 45;
     if (x < P_R || y < P_R || x > MAP.W - P_R || y > MAP.H - P_R) continue;
-    if (!hitsWall(x, y, P_R)) return a;
+    if (!MAP.blocked(x, y, p.z || 0, P_R)) return a;
   }
   return goal + Math.PI;
 }
@@ -466,7 +447,7 @@ function botThink(p, now) {
     goal = Math.atan2(MAP.H / 2 - p.y, MAP.W / 2 - p.x);
   } else {
     const ang = Math.atan2(target.y - p.y, target.x - p.x);
-    const visible = td < BOT.sight && lineOfSight(p.x, p.y, target.x, target.y);
+    const visible = td < BOT.sight && canSee(p, target);
     if (visible) {
       if (!b.reactAt) {
         b.reactAt = now + BOT.reactMin + Math.random() * (BOT.reactMax - BOT.reactMin);
@@ -475,7 +456,8 @@ function botThink(p, now) {
       b.aim += angleDiff(ang, b.aim) * BOT.turn;
       p.input.a = b.aim + (Math.random() - 0.5) * BOT.aimNoise;
       // apuntan al pecho con algo de error vertical (de vez en cuando le pegan a la cabeza)
-      p.input.p = Math.atan2(48 - MAP.EYE_H, td) + (Math.random() - 0.5) * BOT.aimNoise * 0.35;
+      const dz = ((target.z || 0) + CHEST) - ((p.z || 0) + MAP.EYE_H); // tiene en cuenta si esta mas arriba o abajo
+      p.input.p = clamp(Math.atan2(dz, td) + (Math.random() - 0.5) * BOT.aimNoise * 0.35, -MAP.MAX_PITCH, MAP.MAX_PITCH);
       const cycle = (now - b.reactAt) % (BOT.burst + BOT.pause);
       p.input.shoot = now >= b.reactAt && cycle < BOT.burst;
       if (td > far) goal = ang + b.strafe * 0.5;
@@ -549,9 +531,9 @@ io.on('connection', (socket) => {
     const p = players[socket.id];
     if (!p) return;
     data = data || {};
-    startMatch(data.mode, data.minutes, socket.id);
+    startMatch(data.mode, data.minutes, socket.id, data.map);
     const modo = match.mode === 'elim' ? 'Guerra' : 'DeathMatch';
-    io.emit('feed', `${p.name} empezó una partida: ${modo}, ${match.minutes} min`);
+    io.emit('feed', `${p.name} empezó una partida: ${modo} en ${MAP.name}, ${match.minutes} min`);
     balanceTeams();
   });
 
@@ -591,9 +573,9 @@ io.on('connection', (socket) => {
     socket.emit('welcome', { id: socket.id, team });
     io.emit('feed', `${name} entró al equipo ${teamName(team)}`);
     if (startNew && (data.mode === 'tdm' || data.mode === 'elim')) {
-      startMatch(data.mode, data.minutes, socket.id);
+      startMatch(data.mode, data.minutes, socket.id, data.map);
       const modo = match.mode === 'elim' ? 'Guerra' : 'DeathMatch';
-      io.emit('feed', `${name} empezó una partida: ${modo}, ${match.minutes} min`);
+      io.emit('feed', `${name} empezó una partida: ${modo} en ${MAP.name}, ${match.minutes} min`);
     }
     ensureCreator();
     balanceTeams();
@@ -666,7 +648,7 @@ function tryShoot(p, now) {
       if (d > ASSIST_RANGE || d >= bestD) continue;
       const diff = Math.abs(angleDiff(Math.atan2(q.y - p.y, q.x - p.x), a));
       if (diff > ASSIST_ANGLE) continue;
-      if (!lineOfSight(p.x, p.y, q.x, q.y)) continue;
+      if (!canSee(p, q)) continue;
       best = q;
       bestD = d;
     }
@@ -674,9 +656,10 @@ function tryShoot(p, now) {
   }
   p.a = a;
 
+  const bz = (p.z || 0) + MAP.EYE_H; // las balas salen de los ojos (a la altura donde este parado)
   const bx = p.x + Math.cos(a) * (P_R + 8);
   const by = p.y + Math.sin(a) * (P_R + 8);
-  if (pointInWall(bx, by)) return;
+  if (solidAt(bx, by, bz)) return;
   const pitch = clamp(p.input.p || 0, -MAP.MAX_PITCH, MAP.MAX_PITCH);
   for (let i = 0; i < wp.pellets; i++) {
     // la escopeta abre sus perdigones en abanico; las demas tienen un leve desvio
@@ -687,7 +670,7 @@ function tryShoot(p, now) {
     const bp = pitch + (Math.random() - 0.5) * wp.spread * 0.5; // desvio vertical
     const hs = Math.cos(bp) * wp.speed;
     bullets.push({
-      id: ++bulletId, x: bx, y: by, z: MAP.EYE_H,
+      id: ++bulletId, x: bx, y: by, z: bz,
       vx: Math.cos(ba) * hs, vy: Math.sin(ba) * hs, vz: Math.sin(bp) * wp.speed,
       owner: p.id, team: p.team, life: wp.life, dmg: wp.dmg,
     });
@@ -733,6 +716,7 @@ function tick() {
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.hypot(dx, dy);
       if (d >= P_R * 2 || d === 0) continue;
+      if (Math.abs((a.z || 0) - (b.z || 0)) > 60) continue; // uno arriba de un techo y otro abajo: no chocan
       const push = (P_R * 2 - d) / 2;
       a.x -= (dx / d) * push; a.y -= (dy / d) * push;
       b.x += (dx / d) * push; b.y += (dy / d) * push;
@@ -749,16 +733,17 @@ function tick() {
       b.x += (b.vx * DT) / STEPS;
       b.y += (b.vy * DT) / STEPS;
       b.z += (b.vz * DT) / STEPS;
-      if (b.x < 0 || b.y < 0 || b.x > MAP.W || b.y > MAP.H || b.z < 0 || pointInWall3(b.x, b.y, b.z)) {
+      if (b.x < 0 || b.y < 0 || b.x > MAP.W || b.y > MAP.H || b.z < 0 || b.z > 330 || solidAt(b.x, b.y, b.z)) {
         dead = true;
         break;
       }
       for (const id in players) {
         const q = players[id];
         if (!q.alive || q.team === b.team) continue;
-        if (b.z > MAP.TOP_Z) continue; // paso por arriba
+        const rz = b.z - (q.z || 0); // altura de la bala respecto a los pies de q
+        if (rz < 0 || rz > MAP.TOP_Z) continue; // paso por arriba o por abajo
         const d2 = (q.x - b.x) ** 2 + (q.y - b.y) ** 2;
-        const head = b.z >= MAP.HEAD_Z;
+        const head = rz >= MAP.HEAD_Z;
         // la cabeza es mas angosta que el cuerpo
         if (d2 > (head ? MAP.HEAD_R : P_R + 4) ** 2) continue;
         dead = true;
@@ -789,7 +774,7 @@ function tick() {
     const p = players[id];
     list.push({
       id: p.id, n: p.name, t: p.team,
-      x: Math.round(p.x), y: Math.round(p.y), a: +p.a.toFixed(3), pt: +(p.input.p || 0).toFixed(2),
+      x: Math.round(p.x), y: Math.round(p.y), z: Math.round(p.z || 0), a: +p.a.toFixed(3), pt: +(p.input.p || 0).toFixed(2),
       hp: Math.max(0, p.hp), al: p.alive, k: p.kills, d: p.deaths,
       rs: p.alive ? 0 : (p.respawnAt === Infinity ? -1 : Math.max(0, p.respawnAt - now)),
       sp: now < p.protectUntil,
@@ -815,6 +800,7 @@ function tick() {
       bt: match.bannerTeam,
       pl: match.phase === 'playing' ? 0 : Math.max(0, match.phaseUntil - now),
       af: match.autoFill,
+      mp: MAP.id, // mapa actual
       cr: match.creator,
     },
   });
