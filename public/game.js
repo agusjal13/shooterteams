@@ -171,6 +171,24 @@ function openModal(el) {
   if (el === shop) renderShop(true);
 }
 document.getElementById('botsBtn').onclick = () => openModal(botsPanel);
+
+// Salir al menu principal
+const exitAsk = document.getElementById('exitAsk');
+document.getElementById('exitBtn').onclick = () => openModal(exitAsk);
+document.getElementById('exitYes').onclick = () => {
+  exitAsk.classList.remove('open');
+  socket.emit('leave');
+  joinData = null; // que no vuelva a entrar solo al reconectar
+  myId = null;
+  pred.ok = false;
+  touchShoot = mouseShoot = false;
+  fireId = null; joy.id = null; look.id = null;
+  document.querySelectorAll('.modal').forEach((m) => m.classList.remove('open'));
+  if (document.pointerLockElement) document.exitPointerLock();
+  document.body.classList.remove('playing');
+  menu.style.display = '';
+  showStep(1);
+};
 document.getElementById('shopBtn').onclick = () => openModal(shop);
 document.querySelectorAll('[data-close]').forEach((b) => {
   b.onclick = () => b.closest('.modal').classList.remove('open');
@@ -235,8 +253,7 @@ function renderShop(force) {
   // Solo se compra estando vivo dentro de la base propia (equipar se puede en cualquier lado)
   const inBase = !!(me && me.al && MAP.inBase(me.t, me.x, me.y));
   const shopBtn = document.getElementById('shopBtn');
-  document.getElementById('coinsBtn').textContent = '$' + coins + (inBase || !me ? '' : ' · solo en base');
-  shopBtn.classList.toggle('away', !!me && !inBase);
+  shopBtn.classList.toggle('away', !!me && !inBase); // fuera de la base se ve apagado
   document.getElementById('coinsShop').textContent = '$' + coins;
   document.getElementById('shopWarn').style.display = me && !inBase ? 'block' : 'none';
   const grs = me ? me.gr : 0;
@@ -393,7 +410,8 @@ let mouseShoot = false;
 
 function fireBtn() {
   const r = Math.max(48, Math.min(70, H * 0.13));
-  return { x: W - r - 34, y: H - r - 34, r };
+  // separado del borde para no rozar el marco del celular al arrastrarlo
+  return { x: W - r - 78, y: H - r - 40, r };
 }
 // Boton de granada: arriba a la izquierda del de disparo
 function grenadeBtn() {
@@ -761,13 +779,50 @@ function buildCharacter(team, s) {
   const skin = mat(st.skin);
   const legM = mat(st.legs);
 
-  add(g, bodyGeo, teamMat, 0, 45, 0); // torso (22-68)
-  const legL = add(g, legGeo, legM, 0, 11, -8);
-  const legR = add(g, legGeo, legM, 0, 11, 8);
-  add(g, headGeo, skin, 0, 80, 0); // cabeza (67-93)
-  // brazos
-  add(g, new THREE.BoxGeometry(8, 26, 8), teamMat, 4, 50, -20);
-  add(g, new THREE.BoxGeometry(22, 7, 7), teamMat, 12, BULLET_H, 14);
+  // Cilindro que une dos puntos (para brazos)
+  const limb = (from, to, r1, r2, m) => {
+    const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to);
+    const dir = b.clone().sub(a);
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, dir.length(), 8), m);
+    o.position.copy(a).add(b).multiplyScalar(0.5);
+    o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    g.add(o);
+    return o;
+  };
+  const shoeM = mat(0x2a2a2e);
+
+  // Piernas (con pivote en la cadera para animar el paso) y zapatillas
+  const leg = (z) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 34, z);
+    const l = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 4.3, 31, 8), legM);
+    l.position.y = -15.5;
+    pivot.add(l);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(13, 4.5, 8), shoeM);
+    foot.position.set(2.5, -32, 0);
+    pivot.add(foot);
+    g.add(pivot);
+    return pivot;
+  };
+  const legL = leg(-6.5);
+  const legR = leg(6.5);
+  add(g, new THREE.BoxGeometry(13, 8, 22), legM, 0, 37, 0); // cadera
+
+  // Torso: mas ancho en los hombros que en la cintura
+  const torso = add(g, new THREE.CylinderGeometry(13, 10.5, 26, 12), teamMat, 0, 53, 0);
+  torso.scale.x = 0.62;
+  add(g, new THREE.SphereGeometry(5.6, 10, 8), teamMat, 0, 63, -12); // hombros
+  add(g, new THREE.SphereGeometry(5.6, 10, 8), teamMat, 0, 63, 12);
+  add(g, new THREE.CylinderGeometry(4.5, 5, 6, 8), skin, 0, 67.5, 0); // cuello
+  add(g, headGeo, skin, 0, 80, 0); // cabeza (67-93, igual que la zona de headshot)
+
+  // Brazos sosteniendo el arma (mano derecha en la empuñadura, izquierda adelante)
+  limb([0, 63, 12], [5, 51, 16], 4.2, 3.8, teamMat);
+  limb([5, 51, 16], [15, 47, 12.5], 3.8, 3.4, teamMat);
+  add(g, new THREE.SphereGeometry(3.6, 8, 6), skin, 16, 47, 12);
+  limb([0, 63, -12], [11, 53, -9], 4.2, 3.8, teamMat);
+  limb([11, 53, -9], [29, 49, 8], 3.8, 3.4, teamMat);
+  add(g, new THREE.SphereGeometry(3.6, 8, 6), skin, 30, 49, 9);
 
   // Cabeza (todos con ojos y boca)
   addFace(g);
@@ -790,20 +845,21 @@ function buildCharacter(team, s) {
 
   // Equipamiento
   if (st.gear === 'vest') {
-    add(g, new THREE.CylinderGeometry(18.5, 20, 30, 14), accent, 0, 50, 0);
-    add(g, new THREE.BoxGeometry(5, 9, 8), mat(0x3a2a20), 19, 46, -6);
-    add(g, new THREE.BoxGeometry(5, 9, 8), mat(0x3a2a20), 19, 46, 6);
+    add(g, new THREE.BoxGeometry(18, 21, 25), accent, 0, 53, 0);
+    add(g, new THREE.BoxGeometry(4, 7, 7), mat(0x3a2a20), 10.5, 49, -5);
+    add(g, new THREE.BoxGeometry(4, 7, 7), mat(0x3a2a20), 10.5, 49, 5);
   } else if (st.gear === 'backpack') {
-    add(g, new THREE.BoxGeometry(11, 28, 24), mat(0x3b2f2a), -21, 50, 0);
-    add(g, new THREE.BoxGeometry(4, 8, 20), accent, -27, 58, 0);
+    add(g, new THREE.BoxGeometry(9, 24, 18), mat(0x3b2f2a), -12, 54, 0);
+    const roll = add(g, new THREE.CylinderGeometry(4, 4, 18, 10), accent, -12, 68, 0);
+    roll.rotation.x = Math.PI / 2;
   } else if (st.gear === 'pads') {
-    add(g, new THREE.SphereGeometry(8.5, 10, 8), accent, 0, 65, -17);
-    add(g, new THREE.SphereGeometry(8.5, 10, 8), accent, 0, 65, 17);
-    add(g, new THREE.CylinderGeometry(19.5, 19.5, 5, 14), accent, 0, 30, 0); // cinturon
+    add(g, new THREE.SphereGeometry(7.2, 10, 8), accent, 0, 65, -13);
+    add(g, new THREE.SphereGeometry(7.2, 10, 8), accent, 0, 65, 13);
+    add(g, new THREE.BoxGeometry(14, 4, 23), accent, 0, 41, 0); // cinturon
   } else if (st.gear === 'scarf') {
-    add(g, new THREE.CylinderGeometry(15, 17, 7, 14), accent, 0, 69, 0);
-    add(g, new THREE.BoxGeometry(4, 18, 6), accent, -16, 60, 6);
-    add(g, new THREE.BoxGeometry(10, 24, 20), mat(0x2b2f3a), -20, 50, 0);
+    add(g, new THREE.CylinderGeometry(7.5, 8.5, 5, 12), accent, 0, 66, 0);
+    add(g, new THREE.BoxGeometry(3, 14, 5), accent, -9, 58, 5);
+    add(g, new THREE.BoxGeometry(9, 22, 17), mat(0x2b2f3a), -12, 54, 0);
   }
 
   const gunMatA = new THREE.MeshLambertMaterial({ color: 0x1d2128 });
@@ -1011,8 +1067,8 @@ function update3D(now, meP, dt) {
     a.lx = d.x; a.ly = d.y;
     if (sp > 0.5) a.walk += dt * 12;
     const sw = sp > 0.5 ? Math.sin(a.walk) * 6 : 0;
-    a.legL.position.x = sw;
-    a.legR.position.x = -sw;
+    a.legL.rotation.z = sw * 0.075; // las piernas giran desde la cadera al caminar
+    a.legR.rotation.z = -sw * 0.075;
     if (a.w !== p.w) {
       // arma en la mano segun lo que compro
       a.w = p.w;

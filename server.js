@@ -531,14 +531,17 @@ io.on('connection', (socket) => {
     if (Number.isFinite(inp.q)) p.input.q = inp.q;
   });
 
-  socket.on('disconnect', () => {
+  // Salir de la partida (al menu) o desconectarse: el jugador deja de estar en el juego
+  function leave() {
     const p = players[socket.id];
     if (!p) return;
     delete players[socket.id];
     io.emit('feed', `${p.name} se fue`);
     if (humanCount() === 0) removeBots(); // sin humanos, no quedan bots jugando solos
     checkElimination(Date.now());
-  });
+  }
+  socket.on('leave', leave);
+  socket.on('disconnect', leave);
 });
 
 function kill(victim, shooter, now, head, grenade) {
@@ -549,7 +552,7 @@ function kill(victim, shooter, now, head, grenade) {
     shooter.coins += head ? MAP.HEADSHOT_COINS : MAP.KILL_COINS;
   }
   score[victim.team === 'red' ? 'blue' : 'red']++;
-  io.emit('feed', `${shooter ? shooter.name : '???'} ${grenade ? '💣' : head ? '🎯' : '✖'} ${victim.name}`);
+  io.emit('feed', `${shooter ? shooter.name : '???'} ${grenade ? '💣' : head ? '🎯' : '🔫'} ${victim.name}`);
   checkElimination(now);
 }
 
