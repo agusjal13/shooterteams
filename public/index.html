@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#11151c">
+  <title>Rojo vs Azul</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden; background: #11151c; color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none;
+    }
+    canvas { display: block; position: fixed; inset: 0; }
+    .overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 25% 50%, #4a1820 0%, transparent 55%),
+                  radial-gradient(circle at 75% 50%, #172f55 0%, transparent 55%), #11151c;
+      z-index: 10; padding: 16px;
+    }
+    .card { width: 100%; max-width: 380px; text-align: center; }
+    h1 { margin: 0 0 4px; font-size: 40px; letter-spacing: 1px; }
+    h1 .r { color: #ff4d5e; } h1 .b { color: #4d9dff; }
+    p.sub { margin: 0 0 20px; opacity: .7; }
+    input {
+      width: 100%; padding: 14px; font-size: 18px; border-radius: 12px; border: 2px solid #2b3445;
+      background: #1a202b; color: #fff; text-align: center; outline: none; user-select: text; -webkit-user-select: text;
+    }
+    input:focus { border-color: #6b7a96; }
+    .teams { display: flex; gap: 8px; margin: 14px 0; }
+    .teams button {
+      flex: 1; padding: 12px 0; font-size: 16px; font-weight: 700; border-radius: 12px; border: 3px solid transparent;
+      color: #fff; cursor: pointer; opacity: .55;
+    }
+    .teams button.sel { opacity: 1; border-color: #fff; }
+    #tRed { background: #c7303f; } #tAuto { background: #3a4356; } #tBlue { background: #2e6fd1; }
+    #play {
+      width: 100%; padding: 16px; font-size: 22px; font-weight: 800; border: 0; border-radius: 14px;
+      background: #f2c94c; color: #1a1a1a; cursor: pointer;
+    }
+    .hint { margin-top: 14px; font-size: 13px; opacity: .55; line-height: 1.4; }
+    #rotate { display: none; z-index: 20; flex-direction: column; gap: 10px; font-size: 20px; }
+    #rotate .icon { font-size: 54px; animation: spin 2s ease-in-out infinite; }
+    @keyframes spin { 0%,30% { transform: rotate(0); } 60%,100% { transform: rotate(90deg); } }
+    @media (orientation: portrait) and (pointer: coarse) {
+      body.playing #rotate { display: flex; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="overlay" id="menu">
+    <div class="card">
+      <h1><span class="r">ROJO</span> vs <span class="b">AZUL</span></h1>
+      <p class="sub">Shooter por equipos</p>
+      <input id="name" maxlength="14" placeholder="Tu nombre" autocomplete="off">
+      <div class="teams">
+        <button id="tRed" data-team="red">Rojo</button>
+        <button id="tAuto" data-team="auto" class="sel">Auto</button>
+        <button id="tBlue" data-team="blue">Azul</button>
+      </div>
+      <button id="play">JUGAR</button>
+      <div class="hint">
+        Celular: analógico a la izquierda para moverte y apuntar, botón a la derecha para disparar.<br>
+        PC: WASD para moverte, mouse para apuntar, click o espacio para disparar.
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="rotate">
+    <div class="icon">📱</div>
+    <div>Girá el celular</div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="map.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

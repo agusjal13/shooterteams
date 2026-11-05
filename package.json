@@ -1,0 +1,16 @@
+{
+  "name": "shooter-equipos",
+  "version": "0.1.0",
+  "description": "Shooter multijugador para celular: equipo rojo vs azul",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
