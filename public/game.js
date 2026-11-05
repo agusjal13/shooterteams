@@ -1,5 +1,5 @@
 import * as THREE from '/vendor/three/three.module.js';
-import { createWorld, minimapColor, buildBlaster } from './world.js';
+import { createWorld, minimapColor, buildBlaster, toon, roundBox } from './world.js';
 
 const socket = io();
 const hud = document.getElementById('hud');
@@ -854,12 +854,13 @@ function setViewWeapon(w) {
 }
 setViewWeapon(0);
 // Manga del brazo en primera persona, con el color de tu personaje
-const sleeveMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
-const sleeve = new THREE.Mesh(new THREE.BoxGeometry(7, 7, 26), sleeveMat);
+// brazo y mano redondeados (estilo dibujo animado)
+const sleeveMat = toon({ color: 0x888888 });
+const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(3.8, 22, 4, 12), sleeveMat);
+sleeve.rotation.x = Math.PI / 2 + 0.35;
 sleeve.position.set(1, -9, 18);
-sleeve.rotation.x = 0.35;
 viewGun.add(sleeve);
-const hand = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 6), new THREE.MeshLambertMaterial({ color: 0xf0c9a0 }));
+const hand = new THREE.Mesh(new THREE.SphereGeometry(3.6, 14, 10), toon({ color: 0xf0c9a0 }));
 hand.position.set(0, -7, 6);
 viewGun.add(hand);
 let sleeveKey = '';
@@ -879,14 +880,14 @@ camera.add(viewGun);
 // Avatares de otros jugadores
 const avatars = {};
 const bodyGeo = new THREE.CylinderGeometry(16, 19, 46, 14);
-const headGeo = new THREE.SphereGeometry(13, 14, 12);
+const headGeo = new THREE.SphereGeometry(13, 26, 18);
 const visorGeo = new THREE.BoxGeometry(6, 6, 18);
 const gunGeo = new THREE.BoxGeometry(32, 6, 6);
 const legGeo = new THREE.BoxGeometry(10, 22, 10);
 const shadowGeo = new THREE.CircleGeometry(22, 16);
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false });
-const skinMat = new THREE.MeshLambertMaterial({ color: 0xf0c9a0 });
-const darkMat = new THREE.MeshLambertMaterial({ color: 0x1d2128 });
+const skinMat = toon({ color: 0xf0c9a0 });
+const darkMat = toon({ color: 0x1d2128 });
 
 function makeLabel() {
   const c = document.createElement('canvas');
@@ -919,19 +920,26 @@ function drawLabel(l, name, hp, team, isBot) {
   l.tex.needsUpdate = true;
 }
 
-// Cara: ojos blancos con pupila y una boquita (para que no den miedo)
-const eyeGeo = new THREE.SphereGeometry(3.4, 10, 8);
-const pupilGeo = new THREE.SphereGeometry(1.8, 8, 6);
-const mouthGeo = new THREE.BoxGeometry(1.4, 1.5, 6);
+// Cara de dibujo animado: ojos grandes con brillito, cejas y sonrisa.
+// Se arma dentro del grupo "cabeza" (el centro de la cabeza esta 12 arriba del cuello).
+const eyeGeo = new THREE.SphereGeometry(3.9, 14, 10);
+const pupilGeo = new THREE.SphereGeometry(2.1, 10, 8);
+const shineGeo = new THREE.SphereGeometry(0.8, 6, 5);
+const browGeo = new THREE.CapsuleGeometry(0.7, 4.5, 3, 6);
+const mouthGeo = new THREE.TorusGeometry(3, 0.65, 6, 14, Math.PI);
 const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const pupilMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
-const mouthMat = new THREE.MeshLambertMaterial({ color: 0x7a3a2a });
-function addFace(g) {
+const mouthMat = toon({ color: 0x7a3a2a });
+function addFace(head) {
+  const hy = 12; // centro de la cabeza dentro del grupo
   for (const z of [-5, 5]) {
-    const e = new THREE.Mesh(eyeGeo, eyeWhiteMat); e.position.set(11.2, 80.5, z); g.add(e);
-    const p = new THREE.Mesh(pupilGeo, pupilMat); p.position.set(14.2, 80.7, z); g.add(p);
+    const e = new THREE.Mesh(eyeGeo, eyeWhiteMat); e.position.set(10.6, hy + 1, z); e.scale.set(0.8, 1.1, 1); head.add(e);
+    const p = new THREE.Mesh(pupilGeo, pupilMat); p.position.set(13.6, hy + 1, z); head.add(p);
+    const s = new THREE.Mesh(shineGeo, eyeWhiteMat); s.position.set(15.3, hy + 2, z + 0.8); head.add(s);
+    const b = new THREE.Mesh(browGeo, pupilMat); b.position.set(11.6, hy + 6.2, z); b.rotation.x = Math.PI / 2; b.rotation.y = z > 0 ? 0.25 : -0.25; head.add(b);
   }
-  const m = new THREE.Mesh(mouthGeo, mouthMat); m.position.set(10.9, 72.8, 0); g.add(m);
+  const m = new THREE.Mesh(mouthGeo, mouthMat); // sonrisa
+  m.position.set(11.6, hy - 6, 0); m.rotation.set(0, Math.PI / 2, Math.PI); head.add(m);
 }
 
 // Arma un personaje segun equipo y estilo. Mira hacia +x. Devuelve las partes que se animan.
@@ -940,100 +948,130 @@ function buildCharacter(team, s) {
   const st = styleOf(team, s);
   const mats = []; // materiales propios (para liberarlos despues)
   const mat = (color, basic) => {
-    const m = basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color });
+    const m = basic ? new THREE.MeshBasicMaterial({ color }) : toon({ color });
     mats.push(m);
     return m;
   };
   const add = (g, geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); g.add(o); return o; };
 
   const g = new THREE.Group();
-  const teamMat = new THREE.MeshLambertMaterial({ color: st.body, transparent: true });
+  const teamMat = toon({ color: st.body, transparent: true });
   mats.push(teamMat);
   const accent = mat(st.accent);
   const skin = mat(st.skin);
   const legM = mat(st.legs);
 
-  // Cilindro que une dos puntos (para brazos)
-  const limb = (from, to, r1, r2, m) => {
+  // Capsula que une dos puntos (brazos redondeados)
+  const limb = (from, to, r, m) => {
     const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to);
     const dir = b.clone().sub(a);
-    const o = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, dir.length(), 8), m);
+    const len = dir.length();
+    const o = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.1, len - r), 4, 10), m);
     o.position.copy(a).add(b).multiplyScalar(0.5);
     o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
     g.add(o);
     return o;
   };
   const shoeM = mat(0x2a2a2e);
+  const soleM = mat(0xf2f2f2);
 
-  // Piernas (con pivote en la cadera para animar el paso) y zapatillas
+  // Piernas redondeadas (con pivote en la cadera para animar el paso) y zapatillas con suela
   const leg = (z) => {
     const pivot = new THREE.Group();
     pivot.position.set(0, 34, z);
-    const l = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 4.3, 31, 8), legM);
-    l.position.y = -15.5;
+    const l = new THREE.Mesh(new THREE.CapsuleGeometry(5.3, 19, 4, 12), legM);
+    l.position.y = -14;
     pivot.add(l);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(13, 4.5, 8), shoeM);
-    foot.position.set(2.5, -32, 0);
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(6, 14, 10), shoeM);
+    foot.scale.set(1.6, 0.72, 1.05);
+    foot.position.set(3, -29.5, 0);
     pivot.add(foot);
+    const sole = new THREE.Mesh(new THREE.CylinderGeometry(6.3, 6.3, 1.6, 14), soleM);
+    sole.scale.set(1.6, 1, 1.05);
+    sole.position.set(3, -32.5, 0);
+    pivot.add(sole);
     g.add(pivot);
     return pivot;
   };
-  const legL = leg(-6.5);
-  const legR = leg(6.5);
-  add(g, new THREE.BoxGeometry(13, 8, 22), legM, 0, 37, 0); // cadera
+  const legL = leg(-6.2);
+  const legR = leg(6.2);
+  const hips = add(g, new THREE.CapsuleGeometry(7, 9, 4, 12), legM, 0, 37, 0); // cadera
+  hips.rotation.x = Math.PI / 2;
+  hips.scale.set(0.95, 1, 1);
 
-  // Torso: mas ancho en los hombros que en la cintura
-  const torso = add(g, new THREE.CylinderGeometry(13, 10.5, 26, 12), teamMat, 0, 53, 0);
-  torso.scale.x = 0.62;
-  add(g, new THREE.SphereGeometry(5.6, 10, 8), teamMat, 0, 63, -12); // hombros
-  add(g, new THREE.SphereGeometry(5.6, 10, 8), teamMat, 0, 63, 12);
-  add(g, new THREE.CylinderGeometry(4.5, 5, 6, 8), skin, 0, 67.5, 0); // cuello
-  add(g, headGeo, skin, 0, 80, 0); // cabeza (67-93, igual que la zona de headshot)
+  // Torso con forma de "poroto": se arma girando un perfil curvo
+  const prof = [[0, 0], [9.5, 0.5], [11, 5], [11.3, 12], [12.6, 20], [12.2, 25], [8, 28.5], [0, 29.2]].map(([r, y]) => new THREE.Vector2(r, y));
+  const torso = add(g, new THREE.LatheGeometry(prof, 24), teamMat, 0, 39, 0);
+  torso.scale.x = 0.7;
+  add(g, new THREE.SphereGeometry(5.8, 14, 10), teamMat, 0, 63, -11.5); // hombros
+  add(g, new THREE.SphereGeometry(5.8, 14, 10), teamMat, 0, 63, 11.5);
+  add(g, new THREE.CapsuleGeometry(4.2, 3, 4, 10), skin, 0, 67.5, 0); // cuello
+
+  // Cabeza en su propio grupo (asi se inclina segun hacia donde apunta). Centro en y=80 (headshot 66-94).
+  const head = new THREE.Group();
+  head.position.set(0, 68, 0);
+  g.add(head);
+  add(head, headGeo, skin, 0, 12, 0);
+  const ear = new THREE.SphereGeometry(3, 10, 8);
+  add(head, ear, skin, 0, 12, -12.8).scale.set(0.7, 1, 0.5);
+  add(head, ear, skin, 0, 12, 12.8).scale.set(0.7, 1, 0.5);
 
   // Brazos sosteniendo el arma (mano derecha en la empuñadura, izquierda adelante)
-  limb([0, 63, 12], [5, 51, 16], 4.2, 3.8, teamMat);
-  limb([5, 51, 16], [15, 47, 12.5], 3.8, 3.4, teamMat);
-  add(g, new THREE.SphereGeometry(3.6, 8, 6), skin, 16, 47, 12);
-  limb([0, 63, -12], [11, 53, -9], 4.2, 3.8, teamMat);
-  limb([11, 53, -9], [29, 49, 8], 3.8, 3.4, teamMat);
-  add(g, new THREE.SphereGeometry(3.6, 8, 6), skin, 30, 49, 9);
+  limb([0, 63, 11.5], [5, 51, 16], 4, teamMat);
+  limb([5, 51, 16], [15, 47, 12.5], 3.6, teamMat);
+  add(g, new THREE.SphereGeometry(3.9, 12, 10), skin, 16, 47, 12);
+  limb([0, 63, -11.5], [11, 53, -9], 4, teamMat);
+  limb([11, 53, -9], [29, 49, 8], 3.6, teamMat);
+  add(g, new THREE.SphereGeometry(3.9, 12, 10), skin, 30, 49, 9);
 
-  // Cabeza (todos con ojos y boca)
-  addFace(g);
+  // Cara y lo que lleva en la cabeza
+  addFace(head);
+  const dome = (r) => new THREE.SphereGeometry(r, 22, 12, 0, Math.PI * 2, 0, Math.PI / 2);
   if (st.hat === 'helmet') {
-    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 85, 0);
-    add(g, new THREE.CylinderGeometry(15.5, 15.5, 2.5, 16), accent, 0, 85, 0);
+    add(head, dome(14.9), accent, 0, 16, 0);
+    add(head, new THREE.TorusGeometry(15, 1.6, 8, 28), accent, 0, 16.3, 0).rotation.x = Math.PI / 2;
   } else if (st.hat === 'bandana') {
-    add(g, new THREE.CylinderGeometry(13.6, 13.6, 4, 16), accent, 0, 87, 0);
-    add(g, new THREE.BoxGeometry(6, 3, 3), accent, -15, 86, 3);
-    add(g, new THREE.BoxGeometry(18, 9, 3), accent, -1, 95, 0); // cresta
+    add(head, new THREE.TorusGeometry(13.4, 2.4, 8, 28), accent, 0, 18, 0).rotation.x = Math.PI / 2;
+    add(head, new THREE.SphereGeometry(2.6, 10, 8), accent, -14.5, 18, 3); // nudo
+    add(head, new THREE.CapsuleGeometry(1.6, 5, 4, 8), accent, -16, 15, 5).rotation.z = 0.8;
+    // cresta: puntas redondeadas
+    for (let i = 0; i < 4; i++) {
+      const c = add(head, new THREE.ConeGeometry(3.4, 9 - i, 12), accent, 6 - i * 5, 27.5 - i * 0.6, 0);
+      c.rotation.z = 0.25 + i * 0.12;
+    }
   } else if (st.hat === 'goggles') {
-    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 85, 0);
+    add(head, dome(14.9), accent, 0, 16, 0);
+    add(head, new THREE.TorusGeometry(15, 1.3, 8, 28), mat(0x2b3440), 0, 20, 0).rotation.x = Math.PI / 2.4;
     // antiparras levantadas sobre el casco (asi se le ven los ojos)
-    const gog = add(g, new THREE.BoxGeometry(4, 5, 20), mat(0x6fe0ff, true), 11, 90, 0);
-    gog.rotation.z = -0.5;
+    for (const z of [-5, 5]) {
+      const lens = add(head, new THREE.CylinderGeometry(4, 4, 3, 16), mat(0x6fe0ff, true), 9.5, 24, z);
+      lens.rotation.z = Math.PI / 2 - 0.6;
+    }
   } else if (st.hat === 'cap') {
-    add(g, new THREE.CylinderGeometry(13.9, 13.9, 7, 16), accent, 0, 89, 0);
-    add(g, new THREE.BoxGeometry(14, 2, 20), accent, 14, 86, 0); // visera
+    const cap = add(head, dome(14), accent, 0, 16, 0);
+    cap.scale.y = 0.85;
+    const brim = add(head, new THREE.CylinderGeometry(10, 10, 1.6, 22, 1, false, 0, Math.PI), accent, 11, 16.5, 0);
+    brim.rotation.y = Math.PI / 2;
+    add(head, new THREE.SphereGeometry(1.8, 8, 6), accent, 0, 28, 0); // botoncito
   }
 
-  // Equipamiento
+  // Equipamiento (todo con bordes redondeados)
   if (st.gear === 'vest') {
-    add(g, new THREE.BoxGeometry(18, 21, 25), accent, 0, 53, 0);
-    add(g, new THREE.BoxGeometry(4, 7, 7), mat(0x3a2a20), 10.5, 49, -5);
-    add(g, new THREE.BoxGeometry(4, 7, 7), mat(0x3a2a20), 10.5, 49, 5);
+    add(g, roundBox(18, 21, 25, 6), accent, 0, 53, 0);
+    add(g, roundBox(4, 7, 7, 1.6), mat(0x3a2a20), 10.5, 49, -5);
+    add(g, roundBox(4, 7, 7, 1.6), mat(0x3a2a20), 10.5, 49, 5);
   } else if (st.gear === 'backpack') {
-    add(g, new THREE.BoxGeometry(9, 24, 18), mat(0x3b2f2a), -12, 54, 0);
-    const roll = add(g, new THREE.CylinderGeometry(4, 4, 18, 10), accent, -12, 68, 0);
-    roll.rotation.x = Math.PI / 2;
+    add(g, roundBox(9, 24, 18, 4), mat(0x3b2f2a), -12, 54, 0);
+    add(g, new THREE.CapsuleGeometry(4, 12, 4, 10), accent, -12, 68, 0).rotation.x = Math.PI / 2;
   } else if (st.gear === 'pads') {
-    add(g, new THREE.SphereGeometry(7.2, 10, 8), accent, 0, 65, -13);
-    add(g, new THREE.SphereGeometry(7.2, 10, 8), accent, 0, 65, 13);
-    add(g, new THREE.BoxGeometry(14, 4, 23), accent, 0, 41, 0); // cinturon
+    add(g, new THREE.SphereGeometry(7.2, 14, 10), accent, 0, 65, -12.5).scale.y = 0.75;
+    add(g, new THREE.SphereGeometry(7.2, 14, 10), accent, 0, 65, 12.5).scale.y = 0.75;
+    const belt = add(g, new THREE.TorusGeometry(10.2, 2, 8, 24), accent, 0, 41, 0); // cinturon
+    belt.rotation.x = Math.PI / 2; belt.scale.x = 0.75;
   } else if (st.gear === 'scarf') {
-    add(g, new THREE.CylinderGeometry(7.5, 8.5, 5, 12), accent, 0, 66, 0);
-    add(g, new THREE.BoxGeometry(3, 14, 5), accent, -9, 58, 5);
-    add(g, new THREE.BoxGeometry(9, 22, 17), mat(0x2b2f3a), -12, 54, 0);
+    add(g, new THREE.TorusGeometry(6.8, 2.8, 8, 20), accent, 0, 66, 0).rotation.x = Math.PI / 2;
+    add(g, new THREE.CapsuleGeometry(2, 10, 4, 8), accent, -8.5, 58, 5);
+    add(g, roundBox(9, 22, 17, 4), mat(0x2b2f3a), -12, 54, 0);
   }
 
   // la pistola de agua va en un "soporte" que se inclina segun hacia donde apunta
@@ -1042,7 +1080,7 @@ function buildCharacter(team, s) {
   g.add(gun);
   gun.add(buildBlaster(0).group);
   const muzzle = add(g, new THREE.SphereGeometry(5, 8, 8), mat(0xc8f2ff, true), 48, BULLET_H, 12);
-  return { g, teamMat, legL, legR, gun, muzzle, mats };
+  return { g, teamMat, legL, legR, gun, muzzle, mats, head, torso };
 }
 
 // Fotos de los 4 personajes para el menu (se dibujan una vez con un renderizador chico)
@@ -1081,7 +1119,7 @@ function getAvatar(p) {
   let a = avatars[p.id];
   if (a && a.team === p.t && a.style === p.sy) return a;
   if (a) removeAvatar(p.id);
-  const { g, teamMat, legL, legR, gun, muzzle, mats } = buildCharacter(p.t, p.sy);
+  const { g, teamMat, legL, legR, gun, muzzle, mats, head, torso } = buildCharacter(p.t, p.sy);
   const shadow = new THREE.Mesh(shadowGeo, shadowMat);
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.8;
@@ -1091,7 +1129,7 @@ function getAvatar(p) {
   root.add(shadow);
   root.add(label.sprite);
   scene.add(root);
-  a = avatars[p.id] = { root, body: g, teamMat, muzzle, label, legL, legR, team: p.t, style: p.sy, walk: 0, lx: 0, ly: 0, gun, mats, w: 0 };
+  a = avatars[p.id] = { root, body: g, teamMat, muzzle, label, legL, legR, team: p.t, style: p.sy, walk: 0, lx: 0, ly: 0, gun, mats, w: 0, head, torso, phase: Math.random() * 6 };
   return a;
 }
 function removeAvatar(id) {
@@ -1104,7 +1142,7 @@ function removeAvatar(id) {
   a.label.sprite.material.dispose();
   delete avatars[id];
 }
-const SHARED_GEOS = new Set([bodyGeo, headGeo, visorGeo, gunGeo, legGeo, shadowGeo, eyeGeo, pupilGeo, mouthGeo]);
+const SHARED_GEOS = new Set([bodyGeo, headGeo, visorGeo, gunGeo, legGeo, shadowGeo, eyeGeo, pupilGeo, mouthGeo, shineGeo, browGeo]);
 renderCharPreviews();
 
 // Balas
@@ -1295,9 +1333,19 @@ function update3D(now, meP, dt) {
     const sp = Math.hypot(d.x - a.lx, d.y - a.ly);
     a.lx = d.x; a.ly = d.y;
     if (sp > 0.5) a.walk += dt * 12;
-    const sw = sp > 0.5 ? Math.sin(a.walk) * 6 : 0;
+    const walking = sp > 0.5;
+    const sw = walking ? Math.sin(a.walk) * 6 : 0;
     a.legL.rotation.z = sw * 0.075; // las piernas giran desde la cadera al caminar
     a.legR.rotation.z = -sw * 0.075;
+    // Animaciones de dibujo animado:
+    // rebote al caminar, respiracion quieto, cabeza que sigue la mira y "aplastada" al recibir un golpe
+    const t = now / 1000 + a.phase;
+    a.body.position.y = walking ? Math.abs(Math.sin(a.walk)) * 2.4 : Math.sin(t * 2.2) * 0.5;
+    a.torso.scale.set(0.7 * (1 + Math.sin(t * 2.2) * 0.02), 1 + Math.sin(t * 2.2) * 0.025, 1);
+    a.head.rotation.z = (p.pt || 0) * 0.55 + (walking ? Math.sin(a.walk * 2) * 0.04 : 0);
+    a.body.rotation.x = walking ? Math.sin(a.walk) * 0.05 : 0; // balanceo
+    const squash = Math.max(0, 1 - (now - d.hitAt) / 180);
+    a.body.scale.set(1 + squash * 0.1, 1 - squash * 0.12, 1 + squash * 0.1);
     if (a.w !== p.w) {
       // arma en la mano segun lo que compro
       a.w = p.w;

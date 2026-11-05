@@ -1,6 +1,41 @@
 // Armado 3D de los mapas: texturas dibujadas por codigo (sin imagenes externas),
 // materiales por tipo de objeto, escaleras, decoracion y luces de cada ambiente.
 import * as THREE from '/vendor/three/three.module.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// Sombreado "de dibujo animado": la luz se ve en 4 escalones de color en vez de un degradé
+export const toonRamp = (() => {
+  const t = new THREE.DataTexture(new Uint8Array([120, 175, 225, 255]), 4, 1, THREE.RedFormat);
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.needsUpdate = true;
+  return t;
+})();
+export const toon = (opts) => new THREE.MeshToonMaterial({ ...opts, gradientMap: toonRamp });
+
+// UV segun la posicion (sirve para cajas con bordes redondeados y cualquier forma):
+// cada cara toma la textura de las dos direcciones que la recorren.
+function projUV(geo, tile, w, h, d) {
+  const pos = geo.attributes.position, nor = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const ax = Math.abs(nor.getX(i)), ay = Math.abs(nor.getY(i)), az = Math.abs(nor.getZ(i));
+    const x = pos.getX(i) + w / 2, y = pos.getY(i) + h / 2, z = pos.getZ(i) + d / 2;
+    let u, v, su, sv;
+    if (ax >= ay && ax >= az) { u = z; v = y; su = d; sv = h; }
+    else if (ay >= az) { u = x; v = z; su = w; sv = d; }
+    else { u = x; v = y; su = w; sv = h; }
+    if (tile === 'fit') uv.setXY(i, u / su, v / sv);
+    else uv.setXY(i, u / tile, v / tile);
+  }
+  uv.needsUpdate = true;
+}
+
+// Caja con bordes redondeados (r = radio de la curva)
+export function roundBox(w, h, d, r = 4, tile) {
+  const rr = Math.min(r, Math.min(w, h, d) / 2 - 0.05);
+  const geo = rr > 0.6 ? new RoundedBoxGeometry(w, h, d, 2, rr) : new THREE.BoxGeometry(w, h, d);
+  if (tile) projUV(geo, tile, w, h, d);
+  return geo;
+}
 
 // ---------- Texturas (se dibujan en un canvas) ----------
 const texCache = {};
@@ -228,6 +263,7 @@ function planeUV(geo, w, h, tile) {
 // ---------- Ambientes ----------
 const THEMES = {
   desert: {
+    skyTop: '#3f8fdc', skyMid: '#9cc9ea', skyLow: '#f3e3c3',
     sky: 0xcfe1ea, fogNear: 900, fogFar: 3200, hemi: [0xfff3dc, 0x8a6f4a, 2.4], sun: [0xfff0d0, 2.2],
     floor: 'sand', floorTile: 300, border: { tex: 'sandstone', tile: 160, h: 170, c: 0xffffff },
   },
@@ -236,15 +272,23 @@ const THEMES = {
     floor: 'concrete', floorTile: 260, border: { tex: 'metal', tile: 120, h: 330, c: 0xa9b6c4 }, ceiling: 330,
   },
   town: {
+    skyTop: '#3d8ee6', skyMid: '#8fc6f2', skyLow: '#dff0fb',
     sky: 0x9fcbf0, fogNear: 1000, fogFar: 3600, hemi: [0xeaf4ff, 0x5c6a50, 2.4], sun: [0xfff4e0, 2.1],
     floor: 'asphalt', floorTile: 260, border: { tex: 'brick', tile: 128, h: 200, c: 0xffffff },
   },
 };
 
+// Que tan redondeados son los bordes de cada tipo de objeto
+const ROUNDNESS = {
+  rock: 18, crate: 7, fruitCrate: 7, pallet: 5, dumpster: 9, planter: 9, fountain: 16, kiosk: 9,
+  counter: 5, container: 8, cab: 12, forklift: 12, partition: 6, rack: 4, building: 5, parapet: 2.5,
+  shopWall: 4, shopRoof: 3, balcony: 3, pillar: 6, platform: 4,
+};
+
 // ---------- Materiales por tipo de objeto ----------
 const matCache = {};
 function lam(key, opts) {
-  if (!matCache[key]) matCache[key] = new THREE.MeshLambertMaterial(opts);
+  if (!matCache[key]) matCache[key] = toon(opts);
   return matCache[key];
 }
 // Devuelve [material o lista de materiales, tamaño de repeticion de la textura]
@@ -293,7 +337,7 @@ const CAR_PROFILE = [[0, 14], [0, 33], [4, 39], [32, 42], [46, 61], [95, 63], [1
 const CAR_SIDE_WINDOW = [[38, 44], [49, 59], [93, 60.5], [112, 46]];
 const paintCache = {};
 function carPaint(c) {
-  if (!paintCache[c]) paintCache[c] = new THREE.MeshPhongMaterial({ color: c, shininess: 90, specular: 0x666666 });
+  if (!paintCache[c]) paintCache[c] = toon({ color: c });
   return paintCache[c];
 }
 const glassMat = () => paintCache.glass || (paintCache.glass = new THREE.MeshPhongMaterial({
@@ -406,7 +450,7 @@ const BLASTERS = [
   { len: 40, r: 5.2, body: 0x8e5cf7, accent: 0xff5fa2, tank: 'top', tankR: 6.2, tankL: 17, nozzles: 2 }, // Regadera
   { len: 38, r: 4.4, body: 0x2f9bff, accent: 0xffd23f, tank: 'drum', tankR: 7.5, nozzles: 1 }, // Hidrometralleta
 ];
-const plastic = (c) => paintCache['p' + c] || (paintCache['p' + c] = new THREE.MeshPhongMaterial({ color: c, shininess: 70, specular: 0x555555 }));
+const plastic = (c) => paintCache['p' + c] || (paintCache['p' + c] = toon({ color: c }));
 const waterMat = () => paintCache.water || (paintCache.water = new THREE.MeshPhongMaterial({
   color: 0x7fdcff, shininess: 120, specular: 0xffffff, transparent: true, opacity: 0.6,
 }));
@@ -514,9 +558,8 @@ export function createWorld(scene, hemi, sun, teamHex) {
     });
   }
 
-  function box(g, x, y, w, d, z0, h, mat, tile) {
-    const geo = new THREE.BoxGeometry(w, h, d);
-    if (tile) boxUV(geo, w, h, d, tile);
+  function box(g, x, y, w, d, z0, h, mat, tile, r = 5) {
+    const geo = roundBox(w, h, d, r, tile || 'fit');
     const m = new THREE.Mesh(geo, mat);
     m.position.set(x + w / 2, z0 + h / 2, y + d / 2);
     g.add(m);
@@ -603,18 +646,57 @@ export function createWorld(scene, hemi, sun, teamHex) {
         break;
       }
       case 'cactus': {
-        const mat = lam('cactus', { color: 0x4f8a3c });
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(8, 9, 90, 10), mat);
+        // cactus redondeado: tronco y brazos en forma de capsula, con florcita arriba
+        const mat = lam('cactus', { color: 0x4f9a3c });
+        const trunk = new THREE.Mesh(new THREE.CapsuleGeometry(9, 72, 6, 14), mat);
         trunk.position.set(d.x, 45, d.y);
         g.add(trunk);
         for (const s of [-1, 1]) {
-          const arm = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 30, 8), mat);
-          arm.position.set(d.x + s * 14, 50 + s * 6, d.y);
-          g.add(arm);
-          const elbow = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 14, 8), mat);
+          const h = 46 + s * 8;
+          const elbow = new THREE.Mesh(new THREE.CapsuleGeometry(5.5, 12, 4, 10), mat);
           elbow.rotation.z = Math.PI / 2;
-          elbow.position.set(d.x + s * 8, 36 + s * 6, d.y);
+          elbow.position.set(d.x + s * 14, h, d.y);
           g.add(elbow);
+          const arm = new THREE.Mesh(new THREE.CapsuleGeometry(5.5, 20, 4, 10), mat);
+          arm.position.set(d.x + s * 22, h + 13, d.y);
+          g.add(arm);
+        }
+        const flower = new THREE.Mesh(new THREE.SphereGeometry(4, 10, 8), lam('flower', { color: 0xff6fa8 }));
+        flower.position.set(d.x, 92, d.y);
+        g.add(flower);
+        break;
+      }
+      case 'rock': {
+        // piedra redondeada (no choca, es decoracion)
+        const r = d.r || 18;
+        const m = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 1), lam('deskRock', { color: 0xb88a5a }));
+        m.scale.set(1.3, 0.7, 1);
+        m.rotation.y = d.x;
+        m.position.set(d.x, r * 0.35, d.y);
+        g.add(m);
+        break;
+      }
+      case 'tree': {
+        // arbol: tronco y copa de esferas
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(6, 8, 90, 10), lam('trunk', { color: 0x7a5233 }));
+        trunk.position.set(d.x, 45, d.y);
+        g.add(trunk);
+        const leaf = lam('leaves', { color: 0x4caf50 });
+        const leaf2 = lam('leaves2', { color: 0x66bb4a });
+        for (const [ox, oy, oz, r, m] of [[0, 120, 0, 42, leaf], [-26, 100, 10, 30, leaf2], [24, 102, -8, 32, leaf2], [6, 150, -4, 28, leaf2]]) {
+          const s = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), m);
+          s.position.set(d.x + ox, oy, d.y + oz);
+          g.add(s);
+        }
+        break;
+      }
+      case 'bush': {
+        const m1 = lam('leaves', { color: 0x4caf50 }), m2 = lam('leaves2', { color: 0x66bb4a });
+        for (const [ox, oz, r, m] of [[0, 0, 20, m1], [-16, 6, 15, m2], [16, -4, 16, m2]]) {
+          const s = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), m);
+          s.scale.y = 0.8;
+          s.position.set(d.x + ox, r * 0.7, d.y + oz);
+          g.add(s);
         }
         break;
       }
@@ -642,6 +724,46 @@ export function createWorld(scene, hemi, sun, teamHex) {
         g.add(cage);
         break;
       }
+    }
+  }
+
+  // Cielo: una cupula grande con degradé (arriba mas azul, abajo mas claro) y nubes redondas
+  function addSky(g, MAP, th) {
+    const c = document.createElement('canvas');
+    c.width = 4; c.height = 256;
+    const gc = c.getContext('2d');
+    const gr = gc.createLinearGradient(0, 0, 0, 256);
+    gr.addColorStop(0, th.skyTop || '#4f9de8');
+    gr.addColorStop(0.55, th.skyMid || '#9fd0f5');
+    gr.addColorStop(1, th.skyLow || '#e8f4fb');
+    gc.fillStyle = gr; gc.fillRect(0, 0, 4, 256);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(4200, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })
+    );
+    dome.position.set(MAP.W / 2, -60, MAP.H / 2);
+    g.add(dome);
+    // nubes: grupos de esferas blancas
+    const cloudMat = toon({ color: 0xffffff, fog: false });
+    const puff = new THREE.SphereGeometry(1, 14, 10);
+    for (let i = 0; i < 9; i++) {
+      const cl = new THREE.Group();
+      const n = 4 + Math.floor(Math.random() * 3);
+      for (let k = 0; k < n; k++) {
+        const s = new THREE.Mesh(puff, cloudMat);
+        const r = 70 + Math.random() * 70;
+        s.scale.set(r * 1.3, r * 0.8, r);
+        s.position.set((k - n / 2) * 95 + rnd(-30, 30), rnd(-20, 25), rnd(-40, 40));
+        cl.add(s);
+      }
+      const a = (i / 9) * Math.PI * 2 + rnd(-0.2, 0.2);
+      const dist = 2200 + rnd(0, 900);
+      cl.position.set(MAP.W / 2 + Math.cos(a) * dist, 900 + rnd(0, 500), MAP.H / 2 + Math.sin(a) * dist);
+      cl.rotation.y = -a;
+      g.add(cl);
+      anims.push((now) => { cl.position.x += Math.sin(now / 9000 + i) * 0.08; }); // se mueven despacito
     }
   }
 
@@ -683,6 +805,8 @@ export function createWorld(scene, hemi, sun, teamHex) {
     hemi.color.setHex(th.hemi[0]); hemi.groundColor.setHex(th.hemi[1]); hemi.intensity = th.hemi[2];
     sun.color.setHex(th.sun[0]); sun.intensity = th.sun[1];
 
+    // cielo con degradé y nubes (afuera)
+    if (!th.ceiling) addSky(group, MAP, th);
     // piso
     floorPlane(group, 0, 0, MAP.W, MAP.H, th.floor, th.floorTile, 0);
     // bases de cada equipo
@@ -700,12 +824,12 @@ export function createWorld(scene, hemi, sun, teamHex) {
 
     // paredes y objetos solidos
     for (const w of MAP.walls) {
-      if (w.k === 'carTop') continue; // el auto se dibuja entero con carModel
+      if (w.k === 'carTop' || w.k === 'trunk') continue; // el auto y el arbol se dibujan aparte
       if (w.k === 'car') { carModel(group, w); continue; }
       if (w.k === 'railing') { railingModel(group, w); continue; }
       const [mat, tile] = materialFor(w);
       const zb = w.zb || 0; // objetos elevados (balcon, baranda del balcon)
-      box(group, w.x, w.y, w.w, w.h, zb, w.z - zb, mat, tile);
+      box(group, w.x, w.y, w.w, w.h, zb, w.z - zb, mat, tile, ROUNDNESS[w.k] ?? 5);
       // detalles extra
       if (w.k === 'planter') {
         const plants = new THREE.Mesh(new THREE.BoxGeometry(w.w - 8, 14, w.h - 8), lam('plants', { color: 0x4f8a3c }));

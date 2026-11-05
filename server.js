@@ -12,6 +12,8 @@ const io = new Server(server);
 const noCache = { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') };
 app.use(express.static(path.join(__dirname, 'public'), noCache));
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three', 'build'), noCache));
+// piezas extra de three.js (ej. cajas con bordes redondeados)
+app.use('/vendor/three-addons', express.static(path.join(__dirname, 'node_modules', 'three', 'examples', 'jsm'), noCache));
 
 // ---- Reglas del juego ----
 const TICK = 30;

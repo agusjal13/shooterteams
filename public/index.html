@@ -406,6 +406,9 @@
       if (!window.__gameReady) showErr('El juego no terminó de cargar. Probá actualizar el navegador (Chrome o Safari) y recargar la página.');
     }, 6000);
   </script>
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three/three.module.js", "three/addons/": "/vendor/three-addons/" } }
+  </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="map.js"></script>
   <script type="module" src="game.js"></script>

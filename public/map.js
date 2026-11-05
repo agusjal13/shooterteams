@@ -165,6 +165,8 @@
     const deco = mirror(W, [
       { t: 'cactus', x: 300, y: 330 }, { t: 'cactus', x: 600, y: 1240 }, { t: 'cactus', x: 980, y: 420 },
       { t: 'cactus', x: 560, y: 120 }, { t: 'cactus', x: 1000, y: 1000 },
+      { t: 'rock', x: 640, y: 380, r: 16 }, { t: 'rock', x: 330, y: 1080, r: 22 }, { t: 'rock', x: 1020, y: 160, r: 14 },
+      { t: 'rock', x: 700, y: 1000, r: 12 }, { t: 'rock', x: 150, y: 300, r: 20 },
     ]);
     return {
       id: 'desert', name: 'Desierto', desc: 'Arena, rocas y cajas. Abierto y directo.',
@@ -303,7 +305,14 @@
       { t: 'floor', x: 300, y: 80, w: 800, h: 560, tex: 'sidewalk' },
       { t: 'floor', x: 300, y: 1060, w: 800, h: 560, tex: 'sidewalk' },
       { t: 'lamp', x: 300, y: 650 }, { t: 'lamp', x: 300, y: 1050 }, { t: 'lamp', x: 760, y: 650 }, { t: 'lamp', x: 760, y: 1050 },
+      // arboles en las veredas y arbustos
+      { t: 'tree', x: 1100, y: 110 }, { t: 'tree', x: 1100, y: 1590 }, { t: 'tree', x: 590, y: 610 }, { t: 'tree', x: 590, y: 1090 },
+      { t: 'bush', x: 312, y: 80 + 20 }, { t: 'bush', x: 312, y: 1600 }, { t: 'bush', x: 1120, y: 300 }, { t: 'bush', x: 1120, y: 1400 },
     );
+    // troncos de los arboles (solidos)
+    for (const [tx, ty] of [[1100, 110], [1100, 1590], [590, 610], [590, 1090]]) {
+      L.walls.push({ x: tx - 8, y: ty - 8, w: 16, h: 16, z: 90, k: 'trunk' });
+    }
     for (const o of mirror(W, L.walls)) m.walls.push(o);
     for (const o of mirror(W, L.ramps)) m.ramps.push(o);
     for (const o of mirror(W, L.deco)) m.deco.push(o);
