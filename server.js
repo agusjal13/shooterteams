@@ -217,7 +217,13 @@ function checkElimination(now) {
 }
 
 // ---- Granadas ----
+// Para comprar hay que estar vivo y dentro de la base del propio equipo (equipar lo ya comprado se puede en cualquier lado)
+function canShop(p) {
+  return p.isBot || (p.alive && MAP.inBase(p.team, p.x, p.y));
+}
+
 function buyGrenade(p) {
+  if (!canShop(p)) return 'Solo podés comprar en tu base';
   if (p.grenades >= GR.max) return `Máximo ${GR.max} granadas`;
   if (p.coins < GR.price) return `Te faltan $${GR.price - p.coins}`;
   p.coins -= GR.price;
@@ -231,7 +237,10 @@ function throwGrenade(p, now) {
   p.grenades--;
   const a = p.input.a;
   // se tira hacia donde mira, con una curva hacia arriba
-  const pitch = clamp((p.input.p || 0) + 0.3, -0.5, 1.2);
+  // La mira se traduce en angulo de tiro: mirando recto sale con ~20 grados,
+  // y mirando bien arriba sale a 45 grados (el angulo de mayor alcance).
+  const aim = clamp(p.input.p || 0, -MAP.MAX_PITCH, MAP.MAX_PITCH) / MAP.MAX_PITCH; // -1..1
+  const pitch = aim >= 0 ? 0.35 + aim * (Math.PI / 4 - 0.35) : 0.35 + aim * 0.55;
   const hs = Math.cos(pitch) * GR.throwSpeed;
   let x = p.x + Math.cos(a) * (P_R + 6);
   let y = p.y + Math.sin(a) * (P_R + 6);
@@ -295,6 +304,7 @@ function buyOrEquip(p, w) {
     p.weapon = w;
     return null;
   }
+  if (!canShop(p)) return 'Solo podés comprar en tu base';
   if (p.coins < wp.price) return `Te faltan $${wp.price - p.coins}`;
   p.coins -= wp.price;
   p.owned |= 1 << w;

@@ -63,13 +63,13 @@
   // spread = dispersion (radianes), life = alcance en segundos de vuelo.
   const WEAPONS = [
     { id: 0, name: 'Básica', price: 0, dmg: 20, rate: 170, pellets: 1, spread: 0.02, life: 0.9, speed: 950,
-      desc: 'La de siempre. Equilibrada.' },
+      desc: 'La de siempre, equilibrada.' },
     { id: 1, name: 'Pistola', price: 50, dmg: 28, rate: 200, pellets: 1, spread: 0.02, life: 0.9, speed: 1000,
-      desc: 'Un poco más de daño por tiro.' },
+      desc: 'Más daño por tiro.' },
     { id: 2, name: 'Escopeta', price: 70, dmg: 15, rate: 750, pellets: 6, spread: 0.32, life: 0.42, speed: 900,
-      desc: 'Mucho daño de cerca, lenta y de corto alcance.' },
+      desc: 'Mucho daño de cerca, lenta.' },
     { id: 3, name: 'Metralleta', price: 90, dmg: 12, rate: 75, pellets: 1, spread: 0.09, life: 0.8, speed: 1000,
-      desc: 'Dispara muy rápido, menos daño por bala.' },
+      desc: 'Muy rápida, menos daño.' },
   ];
 
   // Personajes: 2 estilos por equipo (solo cambia el aspecto; el cuerpo y la cabeza miden lo mismo).
@@ -85,41 +85,50 @@
     ],
   };
 
+  const spawns = {
+    red: { x: 60, y: 450, w: 200, h: 500 },
+    blue: { x: W - 260, y: 450, w: 200, h: 500 },
+  };
+  const BASE_PAD = 40; // la base pintada en el piso es la zona de aparicion + 40 de margen
+  function inBase(team, x, y) {
+    const s = spawns[team];
+    return !!s && x >= s.x - BASE_PAD && x <= s.x + s.w + BASE_PAD && y >= s.y - BASE_PAD && y <= s.y + s.h + BASE_PAD;
+  }
+
   const MAP = {
     W,
     H,
     walls,
     resolve,
+    inBase,
+    BASE_PAD,
     STYLES,
     WEAPONS,
     START_COINS: 100,
     KILL_COINS: 5,
     MAX_MINUTES: 15,
     P_R: 22,
-    SPEED: 260,
+    SPEED: 286, // 10% mas rapido que antes (260)
     // Alturas del cuerpo (para las zonas de impacto): piernas 0-22, torso/brazos 22-67, cabeza 67-94
     EYE_H: 62, // altura de los ojos: de aca salen las balas
-    HEAD_Z: 67,
+    HEAD_Z: 66, // la zona de cabeza es un 5% mas grande que antes (67 / 15)
     TOP_Z: 94,
-    HEAD_R: 15, // radio de la cabeza
+    HEAD_R: 15.75, // radio de la cabeza
     MAX_PITCH: 0.7, // cuanto se puede mirar arriba/abajo (radianes, ~40 grados)
     HEADSHOT_COINS: 10,
     // Granada: el daño baja con la distancia al centro de la explosion
     GRENADE: {
       price: 30,
       max: 2, // cuantas podes llevar
-      fuse: 2000, // ms hasta explotar
+      fuse: 2300, // ms hasta explotar
       radius: 230, // alcance de la explosion
       maxDmg: 110, // daño en el centro (mata)
       minDmg: 10, // daño en el borde
-      throwSpeed: 620,
-      gravity: 900,
+      throwSpeed: 860, // mas fuerza: apuntando alto llega a ~900 de distancia
+      gravity: 800,
       cooldown: 700, // ms entre tiros
     },
-    spawns: {
-      red: { x: 60, y: 450, w: 200, h: 500 },
-      blue: { x: W - 260, y: 450, w: 200, h: 500 },
-    },
+    spawns,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = MAP;

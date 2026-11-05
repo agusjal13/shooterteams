@@ -217,29 +217,33 @@ function renderShop(force) {
   const coins = me ? me.c : MAP.START_COINS;
   const owned = me ? me.o : 1;
   const eq = me ? me.w : 0;
-  document.getElementById('coinsBtn').textContent = '$' + coins;
+  // Solo se compra estando vivo dentro de la base propia (equipar se puede en cualquier lado)
+  const inBase = !!(me && me.al && MAP.inBase(me.t, me.x, me.y));
+  const shopBtn = document.getElementById('shopBtn');
+  document.getElementById('coinsBtn').textContent = '$' + coins + (inBase || !me ? '' : ' · solo en base');
+  shopBtn.classList.toggle('away', !!me && !inBase);
   document.getElementById('coinsShop').textContent = '$' + coins;
+  document.getElementById('shopWarn').style.display = me && !inBase ? 'block' : 'none';
   const grs = me ? me.gr : 0;
-  const key = coins + '|' + owned + '|' + eq + '|' + grs;
+  const key = coins + '|' + owned + '|' + eq + '|' + grs + '|' + inBase;
   if (!force && (key === shopKey || !shop.classList.contains('open'))) return;
   shopKey = key;
   shopList.innerHTML = '';
+  const pct = (v) => Math.round(Math.max(8, Math.min(100, v * 100))) + '%';
   for (const w of MAP.WEAPONS) {
     const has = owned & (1 << w.id);
     const card = document.createElement('div');
     card.className = 'wcard' + (eq === w.id ? ' eq' : '');
-    const pct = (v) => Math.round(Math.max(8, Math.min(100, v * 100))) + '%';
     card.innerHTML = `
-      <div class="nm">${w.name}</div>
-      <div class="pr">${w.price ? '$' + w.price : 'Gratis'}</div>
+      <div class="top"><span class="nm">${w.name}</span><span class="pr">${w.price ? '$' + w.price : 'Gratis'}</span></div>
       <div class="ds">${w.desc}</div>
       <div class="stat"><span>Daño</span><i style="--v:${pct((w.dmg * w.pellets) / 90)}"></i></div>
       <div class="stat"><span>Cadencia</span><i style="--v:${pct(80 / w.rate)}"></i></div>
-      <div class="stat"><span>Alcance</span><i style="--v:${pct(w.life / 0.9)}"></i></div>
-      <div class="stat"><span>Daño/seg</span><i style="--v:${pct((w.dmg * w.pellets * 1000) / w.rate / maxDps)}"></i></div>`;
+      <div class="stat"><span>Alcance</span><i style="--v:${pct(w.life / 0.9)}"></i></div>`;
     const btn = document.createElement('button');
     if (eq === w.id) { btn.textContent = 'Equipada'; btn.disabled = true; }
     else if (has) { btn.textContent = 'Equipar'; btn.className = 'eqb'; }
+    else if (!inBase) { btn.textContent = 'En tu base'; btn.className = 'buy'; btn.disabled = true; }
     else {
       btn.textContent = coins >= w.price ? `Comprar $${w.price}` : `Faltan $${w.price - coins}`;
       btn.className = 'buy';
@@ -255,12 +259,12 @@ function renderShop(force) {
   const card = document.createElement('div');
   card.className = 'wcard' + (grs ? ' eq' : '');
   card.innerHTML = `
-    <div class="nm">💣 Granada</div>
-    <div class="pr">$${G.price} c/u</div>
-    <div class="ds">Explota a los ${G.fuse / 1000} s. Más cerca del centro, más daño. Podés llevar ${G.max}.</div>
+    <div class="top"><span class="nm">💣 Granada</span><span class="pr">$${G.price}</span></div>
+    <div class="ds">Más cerca del centro, más daño. Máx. ${G.max}.</div>
     <div class="stat"><span>Tenés</span><b>${grs} / ${G.max}</b></div>`;
   const btn = document.createElement('button');
   if (grs >= G.max) { btn.textContent = 'Llevás el máximo'; btn.disabled = true; }
+  else if (!inBase) { btn.textContent = 'En tu base'; btn.className = 'buy'; btn.disabled = true; }
   else if (coins >= G.price) { btn.textContent = `Comprar $${G.price}`; btn.className = 'buy'; }
   else { btn.textContent = `Faltan $${G.price - coins}`; btn.className = 'buy'; btn.disabled = true; }
   btn.onclick = () => { btn.blur(); socket.emit('buyGrenade'); };
@@ -708,6 +712,21 @@ function drawLabel(l, name, hp, team) {
   l.tex.needsUpdate = true;
 }
 
+// Cara: ojos blancos con pupila y una boquita (para que no den miedo)
+const eyeGeo = new THREE.SphereGeometry(3.4, 10, 8);
+const pupilGeo = new THREE.SphereGeometry(1.8, 8, 6);
+const mouthGeo = new THREE.BoxGeometry(1.4, 1.5, 6);
+const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const pupilMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
+const mouthMat = new THREE.MeshLambertMaterial({ color: 0x7a3a2a });
+function addFace(g) {
+  for (const z of [-5, 5]) {
+    const e = new THREE.Mesh(eyeGeo, eyeWhiteMat); e.position.set(11.2, 80.5, z); g.add(e);
+    const p = new THREE.Mesh(pupilGeo, pupilMat); p.position.set(14.2, 80.7, z); g.add(p);
+  }
+  const m = new THREE.Mesh(mouthGeo, mouthMat); m.position.set(10.9, 72.8, 0); g.add(m);
+}
+
 // Arma un personaje segun equipo y estilo. Mira hacia +x. Devuelve las partes que se animan.
 const styleOf = (team, s) => (MAP.STYLES[team] || MAP.STYLES.red)[s === 1 ? 1 : 0];
 function buildCharacter(team, s) {
@@ -735,23 +754,23 @@ function buildCharacter(team, s) {
   add(g, new THREE.BoxGeometry(8, 26, 8), teamMat, 4, 50, -20);
   add(g, new THREE.BoxGeometry(22, 7, 7), teamMat, 12, BULLET_H, 14);
 
-  // Cabeza
+  // Cabeza (todos con ojos y boca)
+  addFace(g);
   if (st.hat === 'helmet') {
-    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 81, 0);
-    add(g, new THREE.CylinderGeometry(15.5, 15.5, 2.5, 16), accent, 0, 81, 0);
-    add(g, visorGeo, darkMat, 11, 79, 0);
+    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 85, 0);
+    add(g, new THREE.CylinderGeometry(15.5, 15.5, 2.5, 16), accent, 0, 85, 0);
   } else if (st.hat === 'bandana') {
-    add(g, new THREE.CylinderGeometry(13.8, 13.8, 5, 16), accent, 0, 84, 0);
-    add(g, new THREE.BoxGeometry(6, 3, 3), accent, -15, 83, 3);
-    add(g, new THREE.BoxGeometry(18, 9, 3), accent, -1, 94, 0); // cresta
-    add(g, visorGeo, darkMat, 11, 79, 0);
+    add(g, new THREE.CylinderGeometry(13.6, 13.6, 4, 16), accent, 0, 87, 0);
+    add(g, new THREE.BoxGeometry(6, 3, 3), accent, -15, 86, 3);
+    add(g, new THREE.BoxGeometry(18, 9, 3), accent, -1, 95, 0); // cresta
   } else if (st.hat === 'goggles') {
-    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 81, 0);
-    add(g, new THREE.BoxGeometry(5, 6, 20), mat(0x6fe0ff, true), 12, 82, 0); // antiparras brillantes
+    add(g, new THREE.SphereGeometry(14.8, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), accent, 0, 85, 0);
+    // antiparras levantadas sobre el casco (asi se le ven los ojos)
+    const gog = add(g, new THREE.BoxGeometry(4, 5, 20), mat(0x6fe0ff, true), 11, 90, 0);
+    gog.rotation.z = -0.5;
   } else if (st.hat === 'cap') {
-    add(g, new THREE.CylinderGeometry(13.9, 13.9, 7, 16), accent, 0, 88, 0);
-    add(g, new THREE.BoxGeometry(14, 2, 20), accent, 14, 85, 0); // visera
-    add(g, visorGeo, darkMat, 11, 79, 0);
+    add(g, new THREE.CylinderGeometry(13.9, 13.9, 7, 16), accent, 0, 89, 0);
+    add(g, new THREE.BoxGeometry(14, 2, 20), accent, 14, 86, 0); // visera
   }
 
   // Equipamiento
@@ -838,7 +857,7 @@ function removeAvatar(id) {
   a.label.sprite.material.dispose();
   delete avatars[id];
 }
-const SHARED_GEOS = new Set([bodyGeo, headGeo, visorGeo, gunGeo, legGeo, shadowGeo]);
+const SHARED_GEOS = new Set([bodyGeo, headGeo, visorGeo, gunGeo, legGeo, shadowGeo, eyeGeo, pupilGeo, mouthGeo]);
 renderCharPreviews();
 
 // Balas
