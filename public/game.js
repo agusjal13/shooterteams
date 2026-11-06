@@ -525,7 +525,40 @@ document.querySelectorAll('#tools button, .sheet button').forEach((b) => b.addEv
 
 // ---------- Red ----------
 // Si se corta la conexion, al volver se reintenta entrar a la misma sala
+// ---------- Version y boton "Actualizar" ----------
+// Al abrir se anota que version se cargo. Si el servidor despues tiene otra (se subio algo nuevo),
+// el boton se ilumina. Tocarlo baja todos los archivos de nuevo (sin usar lo guardado) y recarga.
+let loadedVersion = null;
+const updBtn = document.getElementById('updBtn');
+const verTag = document.getElementById('verTag');
+async function checkVersion() {
+  try {
+    const r = await fetch('/version', { cache: 'no-store' });
+    const { v } = await r.json();
+    if (!loadedVersion) loadedVersion = v;
+    const nueva = v !== loadedVersion;
+    verTag.textContent = nueva ? `versión ${loadedVersion} · hay una nueva: ${v}` : `versión ${v}`;
+    if (nueva && !updBtn.classList.contains('nueva')) {
+      updBtn.classList.add('nueva');
+      updBtn.textContent = '🔄 ¡Actualizar!';
+      if (myId) notices.push({ msg: '🔄 Hay una versión nueva del juego: tocá Actualizar en el menú', at: performance.now() });
+    }
+  } catch (e) {}
+}
+checkVersion();
+setInterval(checkVersion, 60000);
+updBtn.addEventListener('click', async () => {
+  updBtn.disabled = true;
+  updBtn.textContent = '⏳ Actualizando…';
+  const files = ['/', '/index.html', '/game.js', '/world.js', '/map.js', '/sound.js', '/vendor/three/three.module.js'];
+  await Promise.all(files.map((f) => fetch(f, { cache: 'reload' }).catch(() => {})));
+  location.replace(location.pathname + '?v=' + Date.now().toString(36));
+});
+// la direccion queda limpia despues de actualizar
+if (new URLSearchParams(location.search).has('v')) try { history.replaceState(null, '', location.pathname); } catch (e) {}
+
 socket.on('connect', () => {
+  checkVersion(); // si el servidor se reinicio (por una actualizacion), se nota enseguida
   if (joinData && joinData.code) socket.emit('joinRoom', joinData);
 });
 let myRoom = null; // { c: codigo, pub, name }

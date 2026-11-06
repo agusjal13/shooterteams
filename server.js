@@ -16,6 +16,19 @@ app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'th
 // piezas extra de three.js (ej. cajas con bordes redondeados)
 app.use('/vendor/three-addons', express.static(path.join(__dirname, 'node_modules', 'three', 'examples', 'jsm'), noCache));
 
+// Version que esta corriendo (el commit de GitHub): el boton "Actualizar" la usa para saber si hay una nueva
+const VERSION = (() => {
+  try {
+    return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch (e) {
+    return (process.env.RENDER_GIT_COMMIT || 'dev').slice(0, 7);
+  }
+})();
+app.get('/version', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ v: VERSION });
+});
+
 // ---- Reglas del juego ----
 const TICK = 30;
 const DT = 1 / TICK;
