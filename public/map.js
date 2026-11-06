@@ -502,15 +502,16 @@
   ];
 
   // Personajes: 2 estilos por equipo (solo cambia el aspecto; el cuerpo y la cabeza miden lo mismo).
-  // body = color del cuerpo, accent = color del equipamiento, hat = que lleva en la cabeza, gear = accesorio.
+  // Armadura estilo espartano: body = placas, accent = detalles, visor = color del visor.
+  // (hat/gear/skin/legs quedan para el personaje simple que se usa si no cargan los modelos 3D)
   const STYLES = {
     red: [
-      { name: 'Volcán', desc: 'Casco y chaleco táctico', body: 0xe23b4c, accent: 0x6e1420, skin: 0xf0c9a0, legs: 0x2a1d1f, hat: 'helmet', gear: 'vest' },
-      { name: 'Fénix', desc: 'Bandana, cresta y mochila', body: 0xc92a3c, accent: 0xff9a2e, skin: 0xb07850, legs: 0x1d2128, hat: 'bandana', gear: 'backpack' },
+      { name: 'Titán', desc: 'Armadura pesada, visor dorado', body: 0xd1343f, accent: 0x5e1219, visor: 0xf2b233, skin: 0xf0c9a0, legs: 0x2a1d1f, hat: 'helmet', gear: 'vest' },
+      { name: 'Centella', desc: 'Armadura liviana, visor celeste', body: 0xe0564a, accent: 0x3a3f48, visor: 0x5ce6f0, skin: 0xb07850, legs: 0x1d2128, hat: 'bandana', gear: 'backpack' },
     ],
     blue: [
-      { name: 'Glaciar', desc: 'Casco blanco con antiparras', body: 0x2f7fe6, accent: 0xe8f2ff, skin: 0xf0c9a0, legs: 0x1d2534, hat: 'goggles', gear: 'pads' },
-      { name: 'Tormenta', desc: 'Gorra, bufanda y mochila', body: 0x2259b8, accent: 0xf2c94c, skin: 0x8d5a3b, legs: 0x1d2128, hat: 'cap', gear: 'scarf' },
+      { name: 'Coloso', desc: 'Armadura pesada, visor dorado', body: 0x2f72e0, accent: 0x15306e, visor: 0xf2b233, skin: 0xf0c9a0, legs: 0x1d2534, hat: 'goggles', gear: 'pads' },
+      { name: 'Halcón', desc: 'Armadura liviana, visor celeste', body: 0x3d97ea, accent: 0x3a3f48, visor: 0x5ce6f0, skin: 0x8d5a3b, legs: 0x1d2128, hat: 'cap', gear: 'scarf' },
     ],
   };
 
@@ -541,9 +542,9 @@
     MAX_MINUTES: 15,
     P_R: 22,
     SPEED: 286, // 10% mas rapido que antes (260)
-    // Alturas del cuerpo (desde los pies, para las zonas de impacto): piernas y torso hasta 66, cabeza 66-94
+    // Alturas del cuerpo (desde los pies, para las zonas de impacto): piernas y torso hasta 72, cabeza (casco) 72-94
     EYE_H: 62, // altura de los ojos: de aca salen las balas
-    HEAD_Z: 66,
+    HEAD_Z: 72,
     TOP_Z: 94,
     HEAD_R: 15.75, // radio de la cabeza
     MAX_PITCH: 0.7, // cuanto se puede mirar arriba/abajo (radianes, ~40 grados)

@@ -1,6 +1,7 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { createWorld, minimapColor, buildBlaster, toon, roundBox } from './world.js';
 import * as snd from './sound.js';
+import { loadHeroes, heroesReady, buildHero, poseHero } from './hero.js';
 
 const socket = io();
 const hud = document.getElementById('hud');
@@ -1133,7 +1134,7 @@ function setViewSleeve(team, s) {
   sleeveKey = key;
   const st = styleOf(team, s);
   sleeveMat.color.setHex(st.body);
-  hand.material.color.setHex(st.skin);
+  hand.material.color.setHex(heroesReady() ? 0x2b2f36 : st.skin);
 }
 const GUN_POS = new THREE.Vector3(11, -10, -28);
 viewGun.scale.setScalar(0.6);
@@ -1359,10 +1360,22 @@ function renderCharPreviews() {
     dl.position.set(1, 1.4, 0.8);
     sc.add(dl);
     const cam = new THREE.PerspectiveCamera(30, PW / PH, 1, 2000);
-    cam.position.set(185, 70, 95);
-    cam.lookAt(0, 52, 0);
+    // los personajes 3D son mas altos y finitos: camara un poco mas cerca
+    if (heroesReady()) { cam.position.set(150, 66, 80); cam.lookAt(0, 49, 0); }
+    else { cam.position.set(185, 70, 95); cam.lookAt(0, 52, 0); }
     for (const t of ['red', 'blue']) {
       for (const s of [0, 1]) {
+        if (heroesReady()) {
+          const h = makeHero(t, s, 0);
+          sc.add(h.g);
+          poseHero(h.hero, { gun: h.gun, grip: h.grip, support: h.support });
+          r.render(sc, cam);
+          charPreviews[t + s] = r.domElement.toDataURL('image/png');
+          sc.remove(h.g);
+          h.hero.mats.forEach((m) => m.dispose());
+          disposeTree(h.gun);
+          continue;
+        }
         const c = buildCharacter(t, s);
         c.muzzle.visible = false;
         sc.add(c.g);
@@ -1378,10 +1391,45 @@ function renderCharPreviews() {
   refreshChars();
 }
 
+// Personaje 3D nuevo (armadura) con el arma en las manos. Mira hacia +x.
+const HERO_GUN = new THREE.Vector3(2, 64, 5); // donde sostiene el arma (frente al pecho, lado derecho)
+function makeHero(team, s, w) {
+  const hero = buildHero(s === 1 ? 1 : 0, styleOf(team, s));
+  const gun = new THREE.Group();
+  gun.position.copy(HERO_GUN);
+  hero.g.add(gun);
+  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 8), new THREE.MeshBasicMaterial({ color: 0xc8f2ff }));
+  hero.mats.push(muzzle.material);
+  muzzle.visible = false;
+  const h = { hero, g: hero.g, gun, muzzle, grip: new THREE.Vector3(), support: new THREE.Vector3() };
+  setHeroGun(h, w);
+  return h;
+}
+function setHeroGun(h, w) {
+  for (const c of [...h.gun.children]) { h.gun.remove(c); if (c !== h.muzzle) disposeTree(c); }
+  const { group, len } = buildBlaster(w);
+  group.scale.setScalar(0.85);
+  h.gun.add(group, h.muzzle);
+  h.muzzle.position.set(len * 0.85, 0, 0);
+  h.grip.set(len * 0.15, -8, 0);
+  h.support.set(Math.min(len * 0.4, 12), -3.5, 0);
+}
+
 function getAvatar(p) {
   let a = avatars[p.id];
   if (a && a.team === p.t && a.style === p.sy) return a;
   if (a) removeAvatar(p.id);
+  if (heroesReady()) {
+    const h = makeHero(p.t, p.sy, p.w || 0);
+    const root = new THREE.Group();
+    const shadow = new THREE.Mesh(shadowGeo, shadowMat);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.8;
+    const label = makeLabel();
+    root.add(h.g, shadow, label.sprite);
+    scene.add(root);
+    return (avatars[p.id] = { hero: h.hero, root, body: h.g, gun: h.gun, grip: h.grip, support: h.support, muzzle: h.muzzle, label, mats: h.hero.mats, team: p.t, style: p.sy, w: p.w || 0, walk: 0, mv: 0, lx: 0, ly: 0, phase: Math.random() * 6 });
+  }
   const { g, teamMat, legL, legR, gun, muzzle, mats, head, torso } = buildCharacter(p.t, p.sy);
   const shadow = new THREE.Mesh(shadowGeo, shadowMat);
   shadow.rotation.x = -Math.PI / 2;
@@ -1400,13 +1448,19 @@ function removeAvatar(id) {
   if (!a) return;
   scene.remove(a.root);
   a.mats.forEach((m) => m.dispose());
-  a.root.traverse((o) => { if (o.geometry && !o.isSprite && !SHARED_GEOS.has(o.geometry)) o.geometry.dispose(); });
+  if (a.hero) disposeTree(a.gun);
+  else a.root.traverse((o) => { if (o.geometry && !o.isSprite && !SHARED_GEOS.has(o.geometry)) o.geometry.dispose(); });
   a.label.tex.dispose();
   a.label.sprite.material.dispose();
   delete avatars[id];
 }
 const SHARED_GEOS = new Set([bodyGeo, headGeo, visorGeo, gunGeo, legGeo, shadowGeo, eyeGeo, pupilGeo, mouthGeo, shineGeo, browGeo]);
 renderCharPreviews();
+loadHeroes().then(() => {
+  for (const id of Object.keys(avatars)) removeAvatar(id);
+  sleeveKey = '';
+  renderCharPreviews();
+}).catch((e) => console.warn('personajes 3D no disponibles', e));
 
 // Balas
 // Disparos de agua: una gota con un chorrito detras (rosada para el rojo, celeste para el azul)
@@ -1715,6 +1769,7 @@ function update3D(now, meP, dt) {
     a.root.position.set(d.x, d.z || 0, d.y);
     a.body.rotation.y = -d.a;
     a.gun.rotation.z = p.pt || 0; // el arma sube/baja segun hacia donde apunta
+    if (a.hero) { updateHeroAvatar(a, p, d, now, dt); continue; }
     // caminar
     const sp = Math.hypot(d.x - a.lx, d.y - a.ly);
     a.lx = d.x; a.ly = d.y;
@@ -1783,6 +1838,30 @@ function update3D(now, meP, dt) {
     camera.position.x += (Math.random() - 0.5) * shakeAmt * k;
     camera.position.y += (Math.random() - 0.5) * shakeAmt * k;
   }
+}
+
+function updateHeroAvatar(a, p, d, now, dt) {
+  const sp = Math.hypot(d.x - a.lx, d.y - a.ly);
+  a.lx = d.x; a.ly = d.y;
+  const walking = sp > 0.5;
+  a.mv += ((walking ? 1 : 0) - a.mv) * Math.min(1, dt * 10);
+  if (walking) a.walk += dt * 11;
+  const air = (d.z || 0) > 2;
+  const t = now / 1000 + a.phase;
+  a.body.position.y = walking && !air ? Math.abs(Math.sin(a.walk)) * 1.6 : Math.sin(t * 2.2) * 0.3;
+  const squash = Math.max(0, 1 - (now - d.hitAt) / 180);
+  a.body.scale.set(1 + squash * 0.06, 1 - squash * 0.08, 1 + squash * 0.06);
+  if (a.w !== p.w) { a.w = p.w; setHeroGun(a, p.w); }
+  poseHero(a.hero, { walk: a.walk, moving: a.mv, air, pitch: p.pt || 0, gun: a.gun, grip: a.grip, support: a.support });
+  a.muzzle.visible = p.sf;
+  const hit = now - d.hitAt < 110;
+  for (const m of a.hero.flashMats) {
+    if (m.emissive) m.emissive.setHex(hit ? 0xffffff : 0x000000);
+    m.transparent = !!p.sp;
+    m.opacity = p.sp ? 0.45 + 0.25 * Math.sin(now / 80) : 1;
+  }
+  drawLabel(a.label, p.n, p.hp, p.t, p.bt);
+  a.label.sprite.scale.set(p.bt ? 76 : 64, p.bt ? 21 : 18, 1);
 }
 
 // ---------- HUD 2D ----------
