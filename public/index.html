@@ -263,11 +263,14 @@
     #shop .head { margin-bottom: 6px; }
     .shopWarn { font-size: 12px; background: rgba(242,201,76,.12); border: 1px solid rgba(242,201,76,.4); border-radius: 8px; padding: 5px 8px; margin-bottom: 6px; }
     #shopBtn.away { opacity: .7; }
-    .shop { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 6px; }
+    /* una sola fila: si no entran todas, se desliza de costado (en celulares chicos) */
+    .shop { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(122px, 1fr); gap: 6px; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+    .shop .wcard { scroll-snap-align: start; }
     .wcard { border: 2px solid rgba(255,255,255,.15); border-radius: 10px; padding: 6px 7px; display: flex; flex-direction: column; gap: 3px; }
     .wcard.eq { border-color: #5ee07a; }
-    .wcard .top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
-    .wcard .nm { font-weight: 800; font-size: 14px; white-space: nowrap; }
+    /* nombre arriba y precio abajo: asi los nombres largos no se pisan con el precio */
+    .wcard .top { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; }
+    .wcard .nm { font-weight: 800; font-size: 13.5px; line-height: 1.15; }
     .wcard .pr { color: #f2c94c; font-weight: 700; font-size: 13px; }
     .wcard .ds { font-size: 10.5px; opacity: .7; line-height: 1.25; }
     .stat { display: flex; align-items: center; gap: 5px; font-size: 10px; }
