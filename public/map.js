@@ -549,7 +549,7 @@
     MAX_PITCH: 0.7, // cuanto se puede mirar arriba/abajo (radianes, ~40 grados)
     HEADSHOT_COINS: 10,
     // Granada: el daño baja con la distancia al centro de la explosion
-    // Flashbang: cuesta lo mismo que la granada; no hace daño, deja ciego a los enemigos que lo ven
+    // Flashbang: cuesta lo mismo que la granada; no hace daño, deja ciego a todos los que lo ven (tambien a tu equipo y a vos)
     FLASH: {
       radius: 950, // hasta donde enceguece
       maxMs: 3600, // ceguera maxima (mirandolo de frente y de cerca)

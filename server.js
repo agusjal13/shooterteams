@@ -433,13 +433,14 @@ function updateGrenades(R, now) {
   R.grenades = keep;
 }
 
-// Flashbang: enceguece a los enemigos que lo pueden ver (mas si lo miran de frente y estan cerca)
+// Flashbang: enceguece a todos los que lo pueden ver, de los dos equipos y al que lo tiro
+// (mas si lo miran de frente y estan cerca)
 function flashBang(R, g, now) {
   const F = MAP.FLASH;
   emit(R, 'flash', { x: Math.round(g.x), y: Math.round(g.y), z: Math.round(g.z) });
   for (const id in R.players) {
     const q = R.players[id];
-    if (!q.alive || q.team === g.team) continue; // a tu equipo no lo ciega
+    if (!q.alive) continue;
     const qz = (q.z || 0) + MAP.EYE_H;
     const d = Math.hypot(q.x - g.x, q.y - g.y, qz - g.z);
     if (d > F.radius) continue;

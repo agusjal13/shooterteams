@@ -555,7 +555,7 @@ function renderShop(force) {
   fcard.className = 'wcard' + (fbs ? ' eq' : '');
   fcard.innerHTML = `
     <div class="top"><span class="nm">⚡ Flash</span><span class="pr">$${G.price}</span></div>
-    <div class="ds">No lastima: deja ciegos a los enemigos que lo miran. Mantené apretada la granada para elegirlo.</div>
+    <div class="ds">No lastima: deja ciego a todo el que lo mire, ¡también a tu equipo y a vos! Mantené apretada la granada para elegirlo.</div>
     <div class="stat"><span>Tenés</span><b>${fbs} / ${G.max}</b></div>`;
   const fbtn = document.createElement('button');
   if (fbs >= G.max) { fbtn.textContent = 'Llevás el máximo'; fbtn.disabled = true; }
