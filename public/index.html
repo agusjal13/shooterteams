@@ -226,6 +226,9 @@
     .sheet .row { display: flex; gap: 6px; margin-bottom: 6px; }
     .sheet .row button { flex: 1; padding: 8px 0; }
     .sheet .lbl { font-size: 12px; opacity: .6; margin: 2px 0 4px; }
+    #gunStyles { display: flex; flex-direction: column; gap: 5px; }
+    #gunStyles button { text-align: left; padding: 8px 10px; }
+    #gunStyles button.sel { background: #2a2614 !important; color: #fff !important; border-color: #f2c94c !important; }
     .sheet h3 { margin: 0 0 6px; font-size: 14px; color: #f2c94c; }
     .sel { background: #fff !important; color: #111 !important; }
     .bt[data-team=red].sel { background: #c7303f !important; color: #fff !important; }
@@ -425,6 +428,9 @@
           <h3>Controles</h3>
           <div class="lbl">Sensibilidad de giro: <b class="sensVal">5</b></div>
           <input type="range" class="sens" min="1" max="10" step="1" value="5">
+          <h3 style="margin-top:12px">Sonido de armas</h3>
+          <div class="lbl">Tocá uno para escucharlo; queda elegido el último que tocaste.</div>
+          <div id="gunStyles"></div>
           </div>
         </div>
       </div>

@@ -6,11 +6,13 @@ let ctx = null, master = null, sfxBus = null, musicBus = null, reverbIn = null;
 let muted = false;
 try { muted = localStorage.getItem('rva_mute') === '1'; } catch (e) {}
 
+let visHooked = false;
 function ensure() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     ctx = new AC();
+    noiseBuf = null;
     master = ctx.createGain();
     master.gain.value = muted ? 0 : 1;
     // limitador: si suenan muchas cosas juntas (o una explosion cerca) no satura el parlante
@@ -47,17 +49,57 @@ function ensure() {
     musicBus.connect(warm);
     warm.connect(master);
     // con la app en segundo plano no suena nada
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) ctx.suspend().catch(() => {});
-      else ctx.resume().catch(() => {});
-    });
+    if (!visHooked) {
+      visHooked = true;
+      document.addEventListener('visibilitychange', () => {
+        if (!ctx) return;
+        if (document.hidden) ctx.suspend().catch(() => {});
+        else ctx.resume().catch(() => {});
+      });
+    }
   }
-  if (ctx.state === 'suspended' && !document.hidden) ctx.resume().catch(() => {});
+  if (ctx.state !== 'running' && ctx.state !== 'closed' && !document.hidden) ctx.resume().catch(() => {});
   return ctx;
 }
 
-// Los navegadores solo dejan sonar despues de que la persona toca la pantalla o una tecla
-export function unlock() { ensure(); }
+// Rearma todo el audio desde cero (el iPhone a veces deja el audio "colgado" despues de
+// bloquear la pantalla, una llamada o cambiar de app: dice que anda pero no suena)
+function rebuild() {
+  const wasPlaying = playing;
+  if (wasPlaying) { playing = false; clearInterval(timer); session = null; }
+  const old = ctx;
+  ctx = null;
+  try { old && old.close().catch(() => {}); } catch (e) {}
+  ensure();
+  if (wasPlaying) musicStart();
+}
+
+// Los navegadores solo dejan sonar despues de que la persona toca la pantalla o una tecla.
+// Se llama en cada toque: si el audio quedo pausado lo reanuda, y si quedo trabado lo rearma.
+let checking = false, failed = 0;
+export function unlock() {
+  if (!ensure() || document.hidden) return;
+  // un sonido mudo de 1 muestra "despierta" el audio en el iPhone
+  try {
+    const b = ctx.createBuffer(1, 1, 22050);
+    const s = ctx.createBufferSource();
+    s.buffer = b;
+    s.connect(ctx.destination);
+    s.start(0);
+  } catch (e) {}
+  if (ctx.state === 'interrupted') { rebuild(); return; }
+  if (checking) return;
+  checking = true;
+  const t0 = ctx.currentTime;
+  setTimeout(() => {
+    checking = false;
+    if (!ctx || document.hidden) return;
+    // si el reloj del audio no avanzo, esta trabado: a la segunda vez seguida se rearma
+    if (ctx.state !== 'running' || ctx.currentTime <= t0) {
+      if (++failed >= 2) { failed = 0; rebuild(); }
+    } else failed = 0;
+  }, 350);
+}
 
 export function isMuted() { return muted; }
 export function setMuted(m) {
@@ -212,10 +254,106 @@ const GUNS = [
   { dur: 0.09, f0: 1400, f1: 800, cano: 330, fb: 0.7, vol: 0.42, thump: 145, rev: 0.1 }, // Hidrometralleta
 ];
 
+// ---------- Estilos de sonido de las armas (se elige uno en Partida → Sonido de armas) ----------
+export const GUN_STYLES = ['Cañería', 'Chorro a presión', 'Juguete', 'Arcade', 'Potente'];
+let gunStyle = 0;
+try { gunStyle = Math.max(0, Math.min(GUN_STYLES.length - 1, Number(localStorage.getItem('rva_gun')) || 0)); } catch (e) {}
+export function getGunStyle() { return gunStyle; }
+export function setGunStyle(i) {
+  gunStyle = Math.max(0, Math.min(GUN_STYLES.length - 1, i | 0));
+  try { localStorage.setItem('rva_gun', String(gunStyle)); } catch (e) {}
+}
+// tamaño de cada arma (mismo orden que MAP.WEAPONS): largo del sonido, tono y volumen
+const SIZE = [
+  { len: 1, pitch: 1.1, vol: 0.5 }, // Chorrito
+  { len: 1.3, pitch: 0.9, vol: 0.6 }, // Pistola de agua
+  { len: 2.4, pitch: 0.62, vol: 0.8 }, // Regadera (escopeta)
+  { len: 0.7, pitch: 1, vol: 0.42 }, // Hidrometralleta
+];
+// distorsion suave (para el estilo "Potente")
+let shaper = null;
+function drive(dest) {
+  if (!shaper || shaper.context !== ctx) {
+    shaper = ctx.createWaveShaper();
+    const n = 1024, c = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; c[i] = Math.tanh(x * 3.2) / Math.tanh(3.2); }
+    shaper.curve = c;
+  }
+  const g = ctx.createGain();
+  g.gain.value = 1;
+  const s = ctx.createWaveShaper();
+  s.curve = shaper.curve;
+  g.connect(s);
+  s.connect(dest);
+  return g;
+}
+// "chk-chk" de recargar la escopeta (solo la mia)
+function pump(t) {
+  const p = out(0.32, 0, 0.08);
+  for (const [dt, f] of [[0.42, 1700], [0.56, 1300]]) {
+    noiseBurst(p, t + dt, 0.05, 'bandpass', f, f * 0.8, 3, 1, 0.002);
+    tone(p, t + dt, 0.03, 'square', f / 4, f / 5, 0.12, 0.001);
+  }
+}
+const STYLE_FN = [
+  null, // 0 Cañería: el sonido original (abajo)
+  // 1 Chorro a presión: siseo fuerte del chorro + salpicón donde pega + gotitas
+  (S, big, v, pan, t, r) => {
+    const dest = out(S.vol * v * 1.1, pan, (big ? 0.3 : 0.12) + (1 - v) * 0.25);
+    const d = 0.12 * S.len;
+    noiseBurst(dest, t, d, 'bandpass', 3200 * S.pitch * r, 1400 * S.pitch, 1.3, 0.9, 0.003);
+    noiseBurst(dest, t, d * 0.7, 'highpass', 5000, 3000, 0.7, 0.25, 0.002);
+    noiseBurst(dest, t + d * 0.6, d * 1.4, 'lowpass', 1400 * S.pitch, 300, 0.8, big ? 0.9 : 0.5, 0.01);
+    if (big) tone(dest, t, 0.25, 'sine', 95 * r, 40, 0.8, 0.002);
+    const n = big ? 8 : 2;
+    for (let i = 0; i < n; i++) bubble(dest, t + d * (0.8 + Math.random() * (big ? 3 : 1)), 600 + Math.random() * 700, 0.1, 0.045);
+  },
+  // 2 Juguete: clic de gatillo de plastico + soplido de aire + "plip"
+  (S, big, v, pan, t, r) => {
+    const dest = out(S.vol * v, pan, 0.08 + (1 - v) * 0.2);
+    tone(dest, t, 0.012, 'square', 2600 * r, 2200, 0.25, 0.001);
+    if (big) tone(dest, t + 0.03, 0.012, 'square', 2100 * r, 1800, 0.2, 0.001);
+    noiseBurst(dest, t + 0.008, 0.07 * S.len, 'bandpass', 900 * S.pitch * r, 500 * S.pitch, 0.9, big ? 1 : 0.75, 0.004);
+    noiseBurst(dest, t + 0.05 * S.len, 0.06 * S.len, 'lowpass', 1800, 500, 0.7, 0.35, 0.004);
+    bubble(dest, t + 0.07 * S.len, (big ? 520 : 880) * r, 0.22, big ? 0.09 : 0.06);
+    if (big) for (let i = 0; i < 4; i++) bubble(dest, t + 0.12 + Math.random() * 0.25, 500 + Math.random() * 600, 0.12, 0.05);
+  },
+  // 3 Arcade: "piu" de videojuego con burbuja de agua al final
+  (S, big, v, pan, t, r) => {
+    const dest = out(S.vol * v * 0.9, pan, 0.15 + (1 - v) * 0.25);
+    const d = 0.13 * Math.min(S.len, 1.6);
+    const hi = 1500 * S.pitch * r;
+    tone(dest, t, d, 'triangle', hi, hi * 0.2, 0.6, 0.002);
+    tone(dest, t, d, 'sine', hi * 0.5, hi * 0.12, 0.45, 0.002);
+    if (big) {
+      tone(dest, t + 0.012, d * 1.2, 'triangle', hi * 0.75, hi * 0.15, 0.5, 0.002);
+      tone(dest, t, 0.3, 'sine', 110, 40, 0.8, 0.002);
+      noiseBurst(dest, t, 0.25, 'lowpass', 3000, 300, 0.7, 0.45, 0.002);
+    }
+    bubble(dest, t + d * 0.9, 500 * r, 0.2, 0.07);
+  },
+  // 4 Potente: golpe grave + chorro saturado con mucho cuerpo y eco (mas parecido a un arma real)
+  (S, big, v, pan, t, r) => {
+    const dest = out(S.vol * v * 0.85, pan, (big ? 0.5 : 0.28) + (1 - v) * 0.3);
+    const dd = drive(dest);
+    tone(dest, t, big ? 0.45 : 0.16, 'sine', (big ? 85 : 120) * r, 38, 1, 0.002);
+    noiseBurst(dd, t, (big ? 0.5 : 0.14) * Math.min(S.len, 1.3), 'lowpass', 4200 * S.pitch, 350, 0.8, big ? 0.9 : 0.6, 0.002);
+    squirt(dest, t + 0.01, 0.1 * S.len, 1500 * S.pitch * r, 600, 0.7, 0.5);
+    if (big) for (let i = 0; i < 6; i++) bubble(dest, t + 0.12 + Math.random() * 0.5, 450 + Math.random() * 800, 0.1, 0.045);
+  },
+];
+
 export function shot(weapon, dist = 0, pan = 0) {
   if (!ctx || muted || ctx.state !== 'running') return;
   const v = fall(dist, 1700);
   if (v < 0.02) return;
+  const fn = STYLE_FN[gunStyle];
+  if (fn) {
+    const t = ctx.currentTime;
+    fn(SIZE[weapon] || SIZE[0], weapon === 2, v, pan, t, 0.94 + Math.random() * 0.12);
+    if (weapon === 2 && dist === 0) pump(t);
+    return;
+  }
   if (weapon === 2) { shotgun(v, pan, dist === 0); return; }
   const G = GUNS[weapon] || GUNS[0];
   const t = ctx.currentTime;
@@ -242,13 +380,18 @@ function shotgun(v, pan, mine) {
   for (let i = 0; i < 7; i++) {
     bubble(dest, t + 0.1 + Math.random() * 0.55, 500 + Math.random() * 900, 0.1, 0.04 + Math.random() * 0.04);
   }
-  if (mine) {
-    const pump = out(0.32, 0, 0.08);
-    for (const [dt, f] of [[0.42, 1700], [0.56, 1300]]) {
-      noiseBurst(pump, t + dt, 0.05, 'bandpass', f, f * 0.8, 3, 1, 0.002);
-      tone(pump, t + dt, 0.03, 'square', f / 4, f / 5, 0.12, 0.001);
-    }
-  }
+  if (mine) pump(t);
+}
+
+// Muestra de un estilo: pistola, tres tiros de metralleta y la escopeta
+export function demo(style) {
+  unlock();
+  if (!ctx || muted) return;
+  const prev = gunStyle;
+  gunStyle = style;
+  const seq = [[120, 1], [500, 3], [590, 3], [680, 3], [1020, 2]];
+  for (const [ms, w] of seq) setTimeout(() => { const keep = gunStyle; gunStyle = style; shot(w); gunStyle = keep; }, ms);
+  gunStyle = prev;
 }
 
 // tirar una granada: un "fuuu" corto

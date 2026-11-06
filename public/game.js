@@ -645,14 +645,33 @@ function audioGesture() {
   snd.unlock();
   if (!document.body.classList.contains('playing')) snd.musicStart();
 }
-document.addEventListener('pointerdown', audioGesture, true);
-document.addEventListener('keydown', audioGesture, true);
+// en el iPhone el audio solo se habilita con algunos eventos (touchend, click): se escuchan todos
+for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) document.addEventListener(ev, audioGesture, true);
 // botones de sonido (en el menu y en la partida)
 const sndBtns = [...document.querySelectorAll('.sndBtn')];
 function refreshSndBtns() {
   for (const b of sndBtns) b.textContent = snd.isMuted() ? '🔇 Sonido' : '🔊 Sonido';
 }
 for (const b of sndBtns) b.addEventListener('click', () => { snd.setMuted(!snd.isMuted()); refreshSndBtns(); b.blur(); });
+
+// Elegir el sonido de las armas (Partida → Sonido de armas): tocar uno lo hace sonar y lo deja elegido
+const gunStylesEl = document.getElementById('gunStyles');
+function renderGunStyles() {
+  gunStylesEl.innerHTML = '';
+  snd.GUN_STYLES.forEach((name, i) => {
+    const b = document.createElement('button');
+    b.textContent = `▶ ${i + 1}. ${name}`;
+    if (i === snd.getGunStyle()) b.className = 'sel';
+    b.onclick = () => {
+      b.blur();
+      snd.setGunStyle(i);
+      snd.demo(i);
+      renderGunStyles();
+    };
+    gunStylesEl.appendChild(b);
+  });
+}
+renderGunStyles();
 refreshSndBtns();
 
 // el servidor mide nuestra demora: le devolvemos el "ping" al instante
