@@ -156,9 +156,14 @@
     #rotate .icon { font-size: 54px; animation: spin 2s ease-in-out infinite; }
     @keyframes spin { 0%,30% { transform: rotate(0); } 60%,100% { transform: rotate(90deg); } }
     /* Botones arriba a la izquierda (debajo del minimapa) */
-    #tools { position: fixed; left: 12px; top: 122px; z-index: 5; display: none; gap: 6px; flex-direction: column; align-items: flex-start; }
+    #tools { position: fixed; left: calc(12px + env(safe-area-inset-left)); top: 122px; z-index: 5; display: none; gap: 6px; flex-direction: column; align-items: flex-start; }
     body.playing #tools { display: flex; }
-    #menuTop { position: fixed; top: 10px; right: 10px; z-index: 30; display: flex; gap: 8px; }
+    #tools .toolsRow { display: flex; gap: 8px; align-items: center; }
+    #tools #menuBtn { font-size: 20px; line-height: 1; padding: 7px 12px; }
+    #tools #menuBtn.abierto { background: rgba(60,70,90,.9); }
+    #toolsMenu { display: none; flex-direction: column; gap: 6px; align-items: stretch; }
+    #toolsMenu.open { display: flex; }
+    #menuTop { position: fixed; top: 10px; right: calc(10px + env(safe-area-inset-right)); z-index: 30; display: flex; gap: 8px; }
     #menuTop button { font: 600 14px system-ui, sans-serif; color: #fff; border: 1px solid rgba(255,255,255,.3); background: rgba(10,14,20,.6); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
     #updBtn.nueva { background: #2e9d4f; border-color: #7dffa0; animation: latido 1.2s ease-in-out infinite; }
     @keyframes latido { 50% { transform: scale(1.07); } }
@@ -170,7 +175,7 @@
     }
     /* Tienda: boton a la derecha, entre los mensajes y los botones de disparo */
     #shopBtn {
-      position: fixed; right: 12px; top: 140px; z-index: 5; display: none;
+      position: fixed; right: calc(12px + env(safe-area-inset-right)); top: 140px; z-index: 5; display: none;
       font: 700 15px system-ui, sans-serif; color: #fff; border-radius: 10px; padding: 9px 14px; cursor: pointer;
       background: rgba(120,90,10,.85); border: 1px solid #f2c94c;
     }
@@ -315,10 +320,12 @@
   </div>
 
   <div id="tools">
-      <div id="pingTag">📶 Ping …</div>
-    <button id="botsBtn">⚙️ Partida y bots</button>
-    <button id="exitBtn">🚪 Salir</button>
-    <button class="sndBtn">🔊 Sonido</button>
+    <div class="toolsRow"><button id="menuBtn" aria-label="Menú">☰</button><div id="pingTag">📶 …</div></div>
+    <div id="toolsMenu">
+      <button id="botsBtn">⚙️ Partida y bots</button>
+      <button class="sndBtn">🔊 Sonido</button>
+      <button id="exitBtn">🚪 Salir</button>
+    </div>
   </div>
   <button id="shopBtn">🛒 Tienda</button>
 

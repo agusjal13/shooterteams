@@ -41,6 +41,16 @@ const disp = {}; // posiciones suavizadas por jugador
 let feed = [];
 let myHitAt = 0;
 let W = 0, H = 0, dpr = 1;
+// Zona segura (isla dinamica / notch del iPhone en horizontal): margen extra a cada lado
+let SL = 0, SR = 0;
+const safeProbe = document.createElement('div');
+safeProbe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)';
+document.body.appendChild(safeProbe);
+function readSafe() {
+  const cs = getComputedStyle(safeProbe);
+  SL = parseFloat(cs.paddingLeft) || 0;
+  SR = parseFloat(cs.paddingRight) || 0;
+}
 
 // Prediccion local
 const pred = { x: 0, y: 0, z: 0, ok: false };
@@ -329,7 +339,21 @@ function rememberRoom(code) {
 // ---------- Ventanas: partida/bots y tienda ----------
 const botsPanel = document.getElementById('botsPanel');
 const shop = document.getElementById('shop');
+// Menu desplegable (☰) con partida/bots, sonido y salir; la tienda queda siempre a mano
+const menuBtn = document.getElementById('menuBtn');
+const toolsMenu = document.getElementById('toolsMenu');
+function setToolsMenu(open) {
+  toolsMenu.classList.toggle('open', open);
+  menuBtn.classList.toggle('abierto', open);
+  menuBtn.textContent = open ? '✕' : '☰';
+}
+menuBtn.addEventListener('click', (e) => { e.stopPropagation(); setToolsMenu(!toolsMenu.classList.contains('open')); menuBtn.blur(); });
+// tocar fuera del menu lo cierra
+addEventListener('pointerdown', (e) => {
+  if (toolsMenu.classList.contains('open') && !e.target.closest('#tools')) setToolsMenu(false);
+}, true);
 function openModal(el) {
+  setToolsMenu(false);
   if (document.pointerLockElement) document.exitPointerLock();
   el.classList.add('open');
   if (el === shop) renderShop(true);
@@ -725,7 +749,7 @@ let mouseShoot = false;
 function fireBtn() {
   const r = Math.max(48, Math.min(70, H * 0.13));
   // separado del borde para no rozar el marco del celular al arrastrarlo
-  return { x: W - r - 78, y: H - r - 40, r };
+  return { x: W - SR - r - 78, y: H - r - 40, r };
 }
 // Boton de granada: arriba a la izquierda del de disparo
 function grenadeBtn() {
@@ -1383,6 +1407,7 @@ function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   W = innerWidth;
   H = innerHeight;
+  readSafe();
   hud.width = W * dpr;
   hud.height = H * dpr;
   hud.style.width = W + 'px';
@@ -1497,7 +1522,7 @@ function update3D(now, meP, dt) {
 function drawMinimap(meP) {
   const mw = Math.min(170, W * 0.22);
   const mh = mw * (MAP.H / MAP.W);
-  const x0 = 12, y0 = 12;
+  const x0 = 12 + SL, y0 = 12;
   const k = mw / MAP.W;
   ctx.fillStyle = 'rgba(10,14,20,0.7)';
   ctx.fillRect(x0, y0, mw, mh);
@@ -1536,7 +1561,7 @@ function showPing(pg) {
   pg = pg || 0;
   if (pg === pingShown) return;
   pingShown = pg;
-  pingTag.textContent = `📶 Ping ${pg ? pg + ' ms' : '…'}`;
+  pingTag.textContent = `📶 ${pg ? pg + ' ms' : '…'}`;
   pingTag.style.color = !pg ? '#9aa4b2' : pg < 60 ? '#5ee07a' : pg < 120 ? '#f2c94c' : '#ff6b6b';
 }
 
@@ -1774,7 +1799,7 @@ function drawHUD(now, meP) {
 
 function drawControls() {
   if (!isTouch) return;
-  const baseX = joy.id !== null ? joy.ox : 110;
+  const baseX = joy.id !== null ? joy.ox : 110 + SL;
   const baseY = joy.id !== null ? joy.oy : H - 110;
   const knobX = joy.id !== null ? joy.x : baseX;
   const knobY = joy.id !== null ? joy.y : baseY;
