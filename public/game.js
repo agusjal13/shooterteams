@@ -1,5 +1,6 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { createWorld, minimapColor, buildBlaster, toon, roundBox } from './world.js';
+import * as snd from './sound.js';
 
 const socket = io();
 const hud = document.getElementById('hud');
@@ -275,6 +276,7 @@ function enterGame() {
   joinData = { ...base, code: roomAction.type === 'join' ? roomAction.code : null }; // para reconectar
   menu.style.display = 'none';
   document.body.classList.add('playing');
+  snd.musicStop();
   const el = document.documentElement;
   if (el.requestFullscreen && isTouch) {
     el.requestFullscreen().then(() => {
@@ -294,6 +296,7 @@ function backToMenu(step) {
   if (document.pointerLockElement) document.exitPointerLock();
   document.body.classList.remove('playing');
   menu.style.display = '';
+  snd.musicStart();
   try { history.replaceState(null, '', location.pathname); } catch (e) {}
   roomAction = null;
   showStep(step || 0);
@@ -539,6 +542,39 @@ socket.on('welcome', (d) => {
     notices.push({ msg: `🔒 Sala privada · código ${myRoom.c} · pasáselo a tus amigos`, at: performance.now() });
   }
 });
+// ---------- Sonido ----------
+// distancia y lado (izquierda/derecha) de un sonido respecto de donde estoy mirando
+function hearFrom(x, y) {
+  const dx = x - pred.x, dy = y - pred.y;
+  const d = Math.hypot(dx, dy);
+  return { d, pan: d < 1 ? 0 : Math.sin(Math.atan2(dy, dx) - yaw) * 0.8 };
+}
+socket.on('shot', ([x, y, w, id]) => {
+  if (!myId) return;
+  if (id === myId) { snd.shot(w); return; }
+  const h = hearFrom(x, y);
+  snd.shot(w, h.d, h.pan);
+});
+socket.on('thr', ([x, y]) => {
+  if (!myId) return;
+  const h = hearFrom(x, y);
+  snd.toss(h.d, h.pan);
+});
+// los navegadores solo dejan sonar despues del primer toque: ahi arranca la musica del menu
+function audioGesture() {
+  snd.unlock();
+  if (!document.body.classList.contains('playing')) snd.musicStart();
+}
+document.addEventListener('pointerdown', audioGesture, true);
+document.addEventListener('keydown', audioGesture, true);
+// botones de sonido (en el menu y en la partida)
+const sndBtns = [...document.querySelectorAll('.sndBtn')];
+function refreshSndBtns() {
+  for (const b of sndBtns) b.textContent = snd.isMuted() ? '🔇 Sonido' : '🔊 Sonido';
+}
+for (const b of sndBtns) b.addEventListener('click', () => { snd.setMuted(!snd.isMuted()); refreshSndBtns(); b.blur(); });
+refreshSndBtns();
+
 // el servidor mide nuestra demora: le devolvemos el "ping" al instante
 socket.on('sp', (t) => socket.emit('sp2', t));
 socket.on('teamChanged', (d) => {
@@ -1271,6 +1307,8 @@ socket.on('boom', (b) => {
   const d = Math.hypot(pred.x - b.x, pred.y - b.y);
   const R = MAP.GRENADE.radius;
   if (d < R * 2) { shakeUntil = now + 450; shakeAmt = 7 * (1 - d / (R * 2)); }
+  const h = hearFrom(b.x, b.y);
+  snd.boom(water, h.d, h.pan);
 });
 function updateBlasts(now) {
   const R = MAP.GRENADE.radius;

@@ -388,6 +388,7 @@ function throwGrenade(R, p, now) {
     vx: Math.cos(a) * hs, vy: Math.sin(a) * hs, vz: Math.sin(pitch) * GR.throwSpeed,
     owner: p.id, team: p.team, explodeAt: now + GR.fuse,
   });
+  emit(R, 'thr', [Math.round(x), Math.round(y)]); // sonido de tirar la granada
 }
 
 function updateGrenades(R, now) {
@@ -682,6 +683,8 @@ function tryShoot(R, p, now) {
       rewind: rewindFor(p), // cuanto "en el pasado" estaba viendo el tirador a los demas
     });
   }
+  // aviso para el sonido del disparo: [x, y, arma, quien]
+  emit(R, 'shot', [Math.round(p.x), Math.round(p.y), wp.id, p.id]);
 }
 
 function updatePhase(R, now) {
