@@ -816,7 +816,8 @@ setInterval(() => {
 // ---------- Escena 3D ----------
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: 'high-performance' });
+  // bordes suavizados tambien en el celular (sin esto se ven serruchados / pixelados)
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 } catch (e) {
   window.showErr('Este navegador no soporta gráficos 3D (WebGL 2). Probá con Chrome actualizado. Detalle: ' + e.message);
   throw e;

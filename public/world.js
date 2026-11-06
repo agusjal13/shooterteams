@@ -3,10 +3,11 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
-// Sombreado "de dibujo animado": la luz se ve en 4 escalones de color en vez de un degradé
+// Sombreado "de dibujo animado" suave: la luz pasa de oscuro a claro con transiciones suaves
+// (filtro lineal) en vez de escalones duros que se ven como bandas
 export const toonRamp = (() => {
-  const t = new THREE.DataTexture(new Uint8Array([120, 175, 225, 255]), 4, 1, THREE.RedFormat);
-  t.minFilter = t.magFilter = THREE.NearestFilter;
+  const t = new THREE.DataTexture(new Uint8Array([135, 180, 222, 250, 255]), 5, 1, THREE.RedFormat);
+  t.minFilter = t.magFilter = THREE.LinearFilter;
   t.needsUpdate = true;
   return t;
 })();
@@ -47,21 +48,57 @@ function canvasTex(name, size, draw) {
   c.width = c.height = size;
   const g = c.getContext('2d');
   draw(g, size);
+  soften(g, c, size);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   texCache[name] = t;
   return t;
 }
 
-function noise(g, s, n, colors, rMin = 0.5, rMax = 1.6) {
-  for (let i = 0; i < n; i++) {
-    g.fillStyle = colors[(Math.random() * colors.length) | 0];
-    g.beginPath();
-    g.arc(Math.random() * s, Math.random() * s, rnd(rMin, rMax), 0, Math.PI * 2);
-    g.fill();
+// Difumina toda la textura un poquito (sin cortes en los bordes, asi se sigue repitiendo bien)
+function soften(g, c, s) {
+  if (!('filter' in g)) return; // navegadores viejos: queda sin difuminar
+  const tmp = document.createElement('canvas');
+  tmp.width = tmp.height = s * 3;
+  const tg = tmp.getContext('2d');
+  for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) tg.drawImage(c, x * s, y * s);
+  g.clearRect(0, 0, s, s);
+  g.filter = `blur(${(s / 256) * 1.4}px)`;
+  g.drawImage(tmp, -s, -s);
+  g.filter = 'none';
+}
+
+// El mismo color pero transparente (para que las manchas se desvanezcan hacia afuera)
+function clearOf(col) {
+  if (col[0] === '#') {
+    const n = parseInt(col.slice(1), 16);
+    return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},0)`;
   }
+  return col.replace(/,\s*[\d.]+\)$/, ',0)');
+}
+
+// Manchas suaves y difuminadas (antes eran miles de puntitos que de lejos se veian granulados)
+function noise(g, s, n, colors, rMin = 0.5, rMax = 1.6) {
+  const count = Math.max(24, Math.round(n / 22));
+  for (let i = 0; i < count; i++) {
+    let col = colors[(Math.random() * colors.length) | 0];
+    const x = Math.random() * s, y = Math.random() * s;
+    const r = rnd(rMin, rMax) * rnd(7, 15) * (s / 256);
+    g.globalAlpha = col[0] === '#' ? 0.35 : 0.8;
+    // se dibuja tambien del otro lado si toca un borde (asi la textura repite sin cortes)
+    for (const dx of [-s, 0, s]) for (const dy of [-s, 0, s]) {
+      const cx = x + dx, cy = y + dy;
+      if (cx + r < 0 || cx - r > s || cy + r < 0 || cy - r > s) continue;
+      const gr = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+      gr.addColorStop(0, col);
+      gr.addColorStop(1, clearOf(col));
+      g.fillStyle = gr;
+      g.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+  }
+  g.globalAlpha = 1;
 }
 
 const TEX = {
