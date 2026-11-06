@@ -26,25 +26,19 @@
 
   // Camion: acoplado (contenedor) + cabina, con ruedas.
   function truck(x, y, horizontal, cabAtEnd, color, cabColor) {
+    // las ruedas, el chasis y los detalles los dibuja world.js (trailerModel / cabModel)
     const walls = [], deco = [];
+    const face = horizontal ? (cabAtEnd ? 'e' : 'w') : (cabAtEnd ? 's' : 'n');
     if (horizontal) {
       const tx = cabAtEnd ? x : x + 80;
-      walls.push({ x: tx, y, w: 320, h: 80, z: 125, k: 'container', c: color });
+      walls.push({ x: tx, y, w: 320, h: 80, z: 125, k: 'container', c: color, cab: cabColor, trailer: true, face });
       const cx = cabAtEnd ? x + 324 : x;
-      walls.push({ x: cx, y: y + 8, w: 76, h: 64, z: 100, k: 'cab', c: cabColor });
-      for (const wx of [tx + 40, tx + 110, tx + 260, cx + 38]) {
-        deco.push({ t: 'wheel', x: wx, y: y - 2, r: 16, axis: 'y' });
-        deco.push({ t: 'wheel', x: wx, y: y + 82, r: 16, axis: 'y' });
-      }
+      walls.push({ x: cx, y: y + 8, w: 76, h: 64, z: 100, k: 'cab', c: cabColor, face });
     } else {
       const ty = cabAtEnd ? y : y + 80;
-      walls.push({ x, y: ty, w: 80, h: 320, z: 125, k: 'container', c: color });
+      walls.push({ x, y: ty, w: 80, h: 320, z: 125, k: 'container', c: color, cab: cabColor, trailer: true, face });
       const cy = cabAtEnd ? y + 324 : y;
-      walls.push({ x: x + 8, y: cy, w: 64, h: 76, z: 100, k: 'cab', c: cabColor });
-      for (const wy of [ty + 40, ty + 110, ty + 260, cy + 38]) {
-        deco.push({ t: 'wheel', x: x - 2, y: wy, r: 16, axis: 'x' });
-        deco.push({ t: 'wheel', x: x + 82, y: wy, r: 16, axis: 'x' });
-      }
+      walls.push({ x: x + 8, y: cy, w: 64, h: 76, z: 100, k: 'cab', c: cabColor, face });
     }
     return { walls, deco };
   }
@@ -191,7 +185,7 @@
     );
     // camion de carga y contenedor
     merge(L, truck(560, 600, true, true, 0xd8d8d8, 0xc0392b));
-    L.walls.push({ x: 560, y: 920, w: 290, h: 74, z: 120, k: 'container', c: 0x2f6fb0 });
+    L.walls.push({ x: 560, y: 920, w: 290, h: 74, z: 120, k: 'container', c: 0x2f6fb0, face: 'w' });
     // pallets con carga (cobertura baja) y autoelevadores
     L.walls.push(
       { x: 470, y: 470, w: 80, h: 70, z: 48, k: 'pallet' },

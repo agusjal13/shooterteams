@@ -180,6 +180,15 @@ const TEX = {
     noise(g, s, 500, ['rgba(120,80,40,0.15)']);
     g.fillStyle = 'rgba(0,0,0,0.2)'; g.fillRect(0, 0, s, 4); g.fillRect(0, s - 4, s, 4);
   }),
+  // chapa acanalada (blanca: el color lo pone el material)
+  corrugated: () => canvasTex('corrugated', 128, (g, s) => {
+    for (let x = 0; x < s; x += 16) {
+      const gr = g.createLinearGradient(x, 0, x + 16, 0);
+      gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.35, '#e9e9e9'); gr.addColorStop(0.55, '#b9b9b9'); gr.addColorStop(0.8, '#f4f4f4'); gr.addColorStop(1, '#ffffff');
+      g.fillStyle = gr; g.fillRect(x, 0, 16, s);
+    }
+    noise(g, s, 220, ['rgba(110,90,70,0.10)', 'rgba(255,255,255,0.12)']);
+  }),
   rack: () => canvasTex('rack', 256, (g, s) => {
     g.fillStyle = '#1f2329'; g.fillRect(0, 0, s, s);
     // cajas en los estantes
@@ -476,6 +485,188 @@ function carModel(parent, w) {
   car.position.set(w.x + w.w / 2, 0, w.y + w.h / 2);
   if (!horizontal) car.rotation.y = -Math.PI / 2;
   parent.add(car);
+}
+
+// ---------- Camiones y contenedores con forma real ----------
+// Se arman con el frente hacia +x y despues se giran segun "face" (e, w, s = +y del mapa, n = -y).
+const FACE_ROT = { e: 0, w: Math.PI, s: -Math.PI / 2, n: Math.PI / 2 };
+function placeModel(parent, grp, w) {
+  grp.position.set(w.x + w.w / 2, 0, w.y + w.h / 2);
+  grp.rotation.y = FACE_ROT[w.face] ?? 0;
+  parent.add(grp);
+}
+// largo (a lo largo del frente) y ancho del objeto segun hacia donde mira
+const lenWid = (w) => (w.face === 'n' || w.face === 's' ? [w.h, w.w] : [w.w, w.h]);
+const darkTrim = () => lam('truckTrim', { color: 0x1f2226 });
+const steel = () => lam('truckSteel', { color: 0x5b636c });
+function addBox(g, w, h, d, x, y, z, mat, r = 2, tile) {
+  const m = new THREE.Mesh(roundBox(w, h, d, r, tile), mat);
+  m.position.set(x, y, z);
+  g.add(m);
+  return m;
+}
+// rueda grande con llanta (eje a lo ancho)
+function truckWheel(g, x, z, r = 17, wide = 14, dual = false) {
+  const tire = lam('tire', { color: 0x1b1b1b });
+  const tg = new THREE.CylinderGeometry(r, r, wide, 20);
+  const rg = new THREE.CylinderGeometry(r * 0.55, r * 0.55, wide + 0.8, 14);
+  const hub = new THREE.CylinderGeometry(r * 0.2, r * 0.2, wide + 2, 8);
+  const t = new THREE.Mesh(tg, tire); t.rotation.x = Math.PI / 2; t.position.set(x, r, z); g.add(t);
+  const rim = new THREE.Mesh(rg, dual ? steel() : chromeMat()); rim.rotation.x = Math.PI / 2; rim.position.set(x, r, z); g.add(rim);
+  const h = new THREE.Mesh(hub, darkTrim()); h.rotation.x = Math.PI / 2; h.position.set(x, r, z); g.add(h);
+}
+// Cartel pintado al costado del acoplado
+function decalMat(c) {
+  const key = 'decal' + c;
+  if (paintCache[key]) return paintCache[key];
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 160;
+  const g = cv.getContext('2d');
+  const hex = '#' + new THREE.Color(c).getHexString();
+  g.fillStyle = hex;
+  g.beginPath(); g.moveTo(0, 112); g.lineTo(1024, 78); g.lineTo(1024, 104); g.lineTo(0, 138); g.fill();
+  g.font = 'italic 900 78px system-ui, sans-serif';
+  g.textBaseline = 'middle';
+  g.lineWidth = 8; g.strokeStyle = '#ffffff';
+  g.strokeText('AGUATERO', 60, 56);
+  g.fillStyle = hex; g.fillText('AGUATERO', 60, 56);
+  g.font = 'italic 700 32px system-ui, sans-serif';
+  g.fillStyle = '#39424c'; g.fillText('transporte de agua', 560, 40);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return (paintCache[key] = toon({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+}
+
+// Acoplado: chasis, caja de chapa acanalada con cartel, puertas traseras, ruedas dobles y patas de apoyo
+function trailerModel(parent, w) {
+  const [L, Wd] = lenWid(w);
+  const g = new THREE.Group();
+  const half = Wd / 2, top = w.z;
+  const y0 = 40; // donde empieza la caja
+  const body = lam('trailer' + w.c, { map: TEX.corrugated(), color: w.c ?? 0xf2f2f2 });
+  addBox(g, L, top - y0, Wd, 0, y0 + (top - y0) / 2, 0, body, 3, 46);
+  // marco: zocalo, borde de arriba y esquineros
+  addBox(g, L + 1, 5, Wd + 1.5, 0, y0 + 2, 0, darkTrim(), 1);
+  addBox(g, L + 1, 4, Wd + 1.5, 0, top - 2, 0, steel(), 1);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) addBox(g, 4, top - y0, 4, sx * (L / 2 - 1.5), y0 + (top - y0) / 2, sz * (half - 1.2), steel(), 1);
+  // chasis (largueros) y paragolpes trasero
+  for (const sz of [-1, 1]) addBox(g, L - 10, 9, 8, 0, y0 - 6, sz * (half - 18), darkTrim(), 1);
+  addBox(g, 6, 6, Wd - 10, -L / 2 + 6, 22, 0, lam('bumperStripe', { map: stripes(0xd61f2c, 0xf2f2f2) }), 1);
+  for (const sz of [-1, 1]) addBox(g, 4, 18, 4, -L / 2 + 6, 30, sz * (half - 20), darkTrim(), 1);
+  // puertas traseras: union, trabas y luces
+  const back = -L / 2 - 0.6;
+  addBox(g, 1.5, top - y0 - 8, 1.5, back, y0 + (top - y0) / 2, 0, darkTrim(), 0);
+  for (const zz of [-0.62, -0.22, 0.22, 0.62]) {
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, top - y0 - 10, 6), chromeMat());
+    bar.position.set(back - 1, y0 + (top - y0) / 2, zz * half);
+    g.add(bar);
+  }
+  const tail = new THREE.MeshBasicMaterial({ color: 0xd61f2c });
+  for (const sz of [-1, 1]) {
+    const tl = new THREE.Mesh(new THREE.BoxGeometry(2, 5, 10), tail);
+    tl.position.set(back - 1.2, 30, sz * (half - 10));
+    g.add(tl);
+  }
+  // cartel a los dos costados
+  const dg = new THREE.PlaneGeometry(L * 0.86, L * 0.86 * (160 / 1024));
+  for (const s of [1, -1]) {
+    const d = new THREE.Mesh(dg, decalMat(w.cab ?? 0xc0392b));
+    d.position.set(0, y0 + (top - y0) * 0.55, s * (half + 0.3));
+    if (s < 0) d.rotation.y = Math.PI;
+    g.add(d);
+  }
+  // ruedas dobles atras (dos ejes) con guardabarros, y patas de apoyo adelante
+  for (const ax of [-L / 2 + 44, -L / 2 + 82]) {
+    for (const sz of [-1, 1]) {
+      truckWheel(g, ax, sz * (half - 6), 17, 10, true);
+      truckWheel(g, ax, sz * (half - 18), 17, 10, true);
+    }
+  }
+  for (const sz of [-1, 1]) {
+    addBox(g, 82, 3, 18, -L / 2 + 63, y0 - 1, sz * (half - 9), darkTrim(), 1);
+    addBox(g, 2, 16, 16, -L / 2 + 103, 26, sz * (half - 10), darkTrim(), 0.5); // barrero
+    addBox(g, 4, y0 - 12, 4, L / 2 - 60, (y0 - 12) / 2 + 6, sz * (half - 16), steel(), 1); // pata
+    addBox(g, 10, 3, 10, L / 2 - 60, 2, sz * (half - 16), steel(), 1);
+  }
+  placeModel(parent, g, w);
+}
+
+// Cabina "trompa chata": frente con parrilla y faros, parabrisas, ventanillas, espejos, tanque y escape
+function cabModel(parent, w) {
+  const [L, Wd] = lenWid(w);
+  const g = new THREE.Group();
+  const half = Wd / 2, top = w.z;
+  const paint = carPaint(w.c ?? 0xc0392b);
+  const y0 = 30;
+  // chasis bajo la cabina (se mete abajo del acoplado)
+  addBox(g, L + 6, 10, Wd - 30, -3, 24, 0, darkTrim(), 1);
+  // cabina
+  addBox(g, L - 8, top - y0, Wd, 4, y0 + (top - y0) / 2, 0, paint, 9);
+  // parabrisas (frente) y ventanillas (costados)
+  const glass = glassMat();
+  const ws = new THREE.Mesh(new THREE.PlaneGeometry(Wd - 12, 26), glass);
+  ws.rotation.y = Math.PI / 2;
+  ws.position.set(L / 2 + 0.4, top - 22, 0);
+  g.add(ws);
+  for (const s of [1, -1]) {
+    const sw = new THREE.Mesh(new THREE.PlaneGeometry(26, 22), glass);
+    sw.position.set(L / 2 - 20, top - 22, s * (half + 0.4));
+    g.add(sw);
+    // escalon y tanque de combustible
+    addBox(g, 16, 3, 6, L / 2 - 20, y0 - 4, s * (half - 1), steel(), 1);
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 26, 14), chromeMat());
+    tank.rotation.z = Math.PI / 2;
+    tank.position.set(-L / 2 + 22, 26, s * (half - 8));
+    g.add(tank);
+    // espejo con brazo
+    addBox(g, 2, 2, 8, L / 2 - 2, top - 16, s * (half + 4), darkTrim(), 0.5);
+    addBox(g, 3, 14, 5, L / 2 - 1, top - 20, s * (half + 9), darkTrim(), 1);
+    // faros
+    const hl = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 12), new THREE.MeshBasicMaterial({ color: 0xfff6d6 }));
+    hl.position.set(L / 2 + 0.9, y0 + 12, s * (half - 11));
+    g.add(hl);
+  }
+  // parrilla, paragolpes y visera
+  addBox(g, 2, 22, Wd - 36, L / 2 + 0.6, y0 + 16, 0, darkTrim(), 1);
+  for (let k = 0; k < 4; k++) addBox(g, 2.4, 1.6, Wd - 38, L / 2 + 0.9, y0 + 8 + k * 5, 0, chromeMat(), 0);
+  addBox(g, 6, 9, Wd + 2, L / 2 + 2, 24, 0, steel(), 2);
+  addBox(g, 10, 3, Wd - 4, L / 2 + 1, top - 5, 0, darkTrim(), 1);
+  // deflector en el techo y caño de escape
+  addBox(g, 18, 10, Wd - 10, -L / 2 + 16, top + 4, 0, paint, 4);
+  const pipe = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 50, 10), chromeMat());
+  pipe.position.set(-L / 2 + 2, top - 10, half - 8);
+  g.add(pipe);
+  // ruedas delanteras
+  truckWheel(g, L / 2 - 20, half - 7, 17, 14);
+  truckWheel(g, L / 2 - 20, -(half - 7), 17, 14);
+  placeModel(parent, g, w);
+}
+
+// Contenedor maritimo apoyado en el piso: chapa acanalada, marco, esquineros y puertas con trabas
+function containerModel(parent, w) {
+  const [L, Wd] = lenWid(w);
+  const g = new THREE.Group();
+  const half = Wd / 2, top = w.z;
+  const c = new THREE.Color(w.c ?? 0x2f6fb0);
+  const body = lam('ctr' + w.c, { map: TEX.corrugated(), color: c });
+  const frame = lam('ctrF' + w.c, { color: c.clone().multiplyScalar(0.62) });
+  addBox(g, L - 4, top - 6, Wd - 3, 0, top / 2, 0, body, 2, 40);
+  for (const y of [3, top - 3]) for (const s of [-1, 1]) addBox(g, L, 6, 5, 0, y, s * (half - 2.5), frame, 1);
+  for (const x of [-1, 1]) for (const y of [3, top - 3]) addBox(g, 5, 6, Wd, x * (L / 2 - 2.5), y, 0, frame, 1);
+  for (const x of [-1, 1]) for (const s of [-1, 1]) {
+    addBox(g, 6, top, 6, x * (L / 2 - 3), top / 2, s * (half - 3), frame, 1);
+    addBox(g, 7, 6, 7, x * (L / 2 - 3), 3, s * (half - 3), darkTrim(), 1);
+    addBox(g, 7, 6, 7, x * (L / 2 - 3), top - 3, s * (half - 3), darkTrim(), 1);
+  }
+  const door = L / 2 + 0.6;
+  addBox(g, 1.5, top - 12, 1.5, door, top / 2, 0, frame, 0);
+  for (const zz of [-0.6, -0.2, 0.2, 0.6]) {
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, top - 14, 6), steel());
+    bar.position.set(door + 0.6, top / 2, zz * half);
+    g.add(bar);
+  }
+  placeModel(parent, g, w);
 }
 
 // ---------- Pistolas de agua ----------
@@ -864,6 +1055,8 @@ export function createWorld(scene, hemi, sun, teamHex) {
       if (w.k === 'carTop' || w.k === 'trunk') continue; // el auto y el arbol se dibujan aparte
       if (w.k === 'car') { carModel(group, w); continue; }
       if (w.k === 'railing') { railingModel(group, w); continue; }
+      if (w.k === 'container' && w.face) { (w.trailer ? trailerModel : containerModel)(group, w); continue; }
+      if (w.k === 'cab' && w.face) { cabModel(group, w); continue; }
       const [mat, tile] = materialFor(w);
       const zb = w.zb || 0; // objetos elevados (balcon, baranda del balcon)
       box(group, w.x, w.y, w.w, w.h, zb, w.z - zb, mat, tile, ROUNDNESS[w.k] ?? 5);

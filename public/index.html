@@ -6,6 +6,9 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#11151c">
+  <meta name="apple-mobile-web-app-title" content="Rojo vs Azul">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
   <title>Rojo vs Azul</title>
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -194,6 +197,7 @@
     .sheet h2 { margin: 0; font-size: 18px; flex: 1; }
     .sheet .head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
     .sheet .close { padding: 6px 12px !important; }
+    #botsPanel[data-view="bots"] .vPartida, #botsPanel[data-view="partida"] .vBots { display: none; }
     .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
     .sheet .row { display: flex; gap: 6px; margin-bottom: 6px; }
     .sheet .row button { flex: 1; padding: 8px 0; }
@@ -322,7 +326,8 @@
   <div id="tools">
     <div class="toolsRow"><button id="menuBtn" aria-label="Menú">☰</button><div id="pingTag">📶 …</div></div>
     <div id="toolsMenu">
-      <button id="botsBtn">⚙️ Partida y bots</button>
+      <button id="matchBtn">⚙️ Partida</button>
+      <button id="botsBtn">🤖 Bots</button>
       <button class="sndBtn">🔊 Sonido</button>
       <button id="exitBtn">🚪 Salir</button>
     </div>
@@ -341,9 +346,9 @@
 
   <div class="modal" id="botsPanel">
     <div class="sheet">
-      <div class="head"><h2>Partida y bots</h2><button class="close" data-close>✕</button></div>
+      <div class="head"><h2 id="panelTitle">Partida</h2><button class="close" data-close>✕</button></div>
       <!-- Sala: codigo para invitar, cambiarse de equipo -->
-      <div class="roomBar">
+      <div class="roomBar vPartida">
         <div><span class="lbl">Sala</span> <b id="roomName"></b> <span id="roomPriv" class="tag"></span></div>
         <div class="codeBig">Código: <b id="roomCode">-----</b></div>
         <button id="shareRoom">🔗 Compartir link</button>
@@ -351,7 +356,7 @@
       </div>
       <p class="modeInfo" id="creatorInfo" style="margin:0 0 8px"></p>
       <div class="cols">
-        <div class="adminOnly">
+        <div class="adminOnly vPartida">
           <h3>Mapa y partida <span class="crown">👑 solo el creador</span></h3>
           <div class="lbl">Mapa</div>
           <div class="pmaps" id="pmaps"></div>
@@ -370,7 +375,7 @@
           <p class="modeInfo" style="margin-top:6px">Reinicia puntos, monedas y armas de todos.</p>
         </div>
         <div>
-          <div class="adminOnly">
+          <div class="adminOnly vBots">
           <h3>Bots <span class="crown">👑 solo el creador</span></h3>
           <div class="lbl">Equipo de los bots</div>
           <div class="row">
@@ -388,9 +393,11 @@
           <label class="toggle"><input type="checkbox" id="autoFill" checked> Completar equipos con bots</label>
           <p class="modeInfo" style="margin:2px 0 0">"Quitar todos los bots" también lo apaga, para jugar desparejos (ej. 3 vs 2).</p>
           </div>
-          <h3 style="margin-top:12px">Controles</h3>
+          <div class="vPartida">
+          <h3>Controles</h3>
           <div class="lbl">Sensibilidad de giro: <b class="sensVal">5</b></div>
           <input type="range" class="sens" min="1" max="10" step="1" value="5">
+          </div>
         </div>
       </div>
     </div>

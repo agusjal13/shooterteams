@@ -358,12 +358,17 @@ function openModal(el) {
   el.classList.add('open');
   if (el === shop) renderShop(true);
 }
-document.getElementById('botsBtn').onclick = () => {
+// Un mismo panel con dos vistas: "Partida" (sala, mapa, modo, controles) y "Bots"
+function openPanel(view) {
+  botsPanel.dataset.view = view;
+  document.getElementById('panelTitle').textContent = view === 'bots' ? 'Bots' : 'Partida';
   // el formulario arranca con el mapa que se esta jugando
   if (state && state.m && state.m.mp) { newMap = state.m.mp; refreshMatchForm(); }
   syncMatchPanel();
   openModal(botsPanel);
-};
+}
+document.getElementById('matchBtn').onclick = () => openPanel('partida');
+document.getElementById('botsBtn').onclick = () => openPanel('bots');
 
 // Salir al menu principal
 const exitAsk = document.getElementById('exitAsk');
