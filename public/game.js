@@ -229,7 +229,7 @@ function refreshLobby() {
 // ---------- Mapas: tarjetas con un dibujo del plano visto desde arriba ----------
 let menuMap = 'desert';
 try { if (MAP.MAPS[localStorage.getItem('rva_map')]) menuMap = localStorage.getItem('rva_map'); } catch (e) {}
-const MAP_BG = { desert: '#d8b47c', warehouse: '#7d8288', town: '#4a4d52' };
+const MAP_BG = { desert: '#d8b47c', warehouse: '#7d8288', town: '#4a4d52', garden: '#5f9e3f' };
 function mapThumb(id, wpx) {
   const m = MAP.MAPS[id];
   const c = document.createElement('canvas');
@@ -242,7 +242,7 @@ function mapThumb(id, wpx) {
   g.fillStyle = 'rgba(214,58,58,0.55)'; const r = m.spawns.red; g.fillRect(r.x * k, r.y * k, r.w * k, r.h * k);
   g.fillStyle = 'rgba(46,111,209,0.55)'; const b = m.spawns.blue; g.fillRect(b.x * k, b.y * k, b.w * k, b.h * k);
   for (const w of m.walls) {
-    g.fillStyle = w.c !== undefined && w.k !== 'container' ? '#' + w.c.toString(16).padStart(6, '0') : w.k === 'container' ? '#5f8fc4' : w.k === 'rack' ? '#2b2f36' : w.k === 'crate' || w.k === 'pallet' ? '#9b6a3a' : '#5a4630';
+    g.fillStyle = w.c !== undefined && w.k !== 'container' ? '#' + w.c.toString(16).padStart(6, '0') : w.k === 'container' ? '#5f8fc4' : w.k === 'rack' ? '#2b2f36' : w.k === 'crate' || w.k === 'pallet' ? '#9b6a3a' : w.k === 'hedge' ? '#1f5a1c' : w.k === 'tower' || w.k === 'battlement' ? '#d8cdb8' : '#5a4630';
     g.fillRect(w.x * k, w.y * k, Math.max(1, w.w * k), Math.max(1, w.h * k));
   }
   g.fillStyle = '#39ff14';

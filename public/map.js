@@ -332,7 +332,121 @@
     };
   }
 
-  const MAPS = { desert: makeDesert(), warehouse: makeWarehouse(), town: makeTown() };
+  // ---------- Mapa 4: Laberinto (de plantas, con torres) ----------
+  // Cercos verdes altos (no se ve ni se salta por encima) y 4 torres con escalera:
+  // desde arriba se ve todo el laberinto. Se arma con un sorteo fijo (igual en servidor y cliente).
+  function tower(x, y, s, z, stair) {
+    // base de piedra, piso de madera arriba y almena con hueco donde llega la escalera
+    const walls = [{ x, y, w: s, h: s, z, k: 'tower' }];
+    const P = 7, PZ = z + 26;
+    const add = (x0, y0, ww, hh) => walls.push({ x: x0, y: y0, w: ww, h: hh, z: PZ, zb: z, k: 'battlement' });
+    const g = stair.gap; // {from, to} sobre el lado de la escalera
+    add(x, y, s, P);
+    add(x, y + s - P, s, P);
+    for (const side of ['w', 'e']) {
+      const x0 = side === 'w' ? x : x + s - P;
+      if (stair.side === side) {
+        if (g.from > y + P) add(x0, y + P, P, g.from - (y + P));
+        if (g.to < y + s - P) add(x0, g.to, P, y + s - P - g.to);
+      } else add(x0, y + P, P, s - 2 * P);
+    }
+    return { walls, ramps: [{ ...stair.ramp, top: z }] };
+  }
+
+  function makeGarden() {
+    const W = 2400, H = 1600;
+    const T = 34, HZ = 150; // grosor y alto del cerco
+    const X0 = 300, X1 = 1200, COLS = 6, ROWS = 10;
+    const cw = (X1 - X0) / COLS, ch = H / ROWS;
+    // sorteo con semilla: siempre sale el mismo laberinto
+    let seed = 20261106;
+    const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    // v[c][r]: cerco vertical a la izquierda de la celda c; h[c][r]: cerco horizontal arriba de la fila r
+    const v = [], h = [];
+    for (let c = 0; c <= COLS; c++) { v[c] = []; h[c] = []; for (let r = 0; r <= ROWS; r++) { v[c][r] = true; h[c][r] = true; } }
+    // laberinto perfecto (recorrido en profundidad)
+    const seen = new Set(['0,4']);
+    const stack = [[0, 4]];
+    while (stack.length) {
+      const [c, r] = stack[stack.length - 1];
+      const opts = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dc, dr]) => [c + dc, r + dr, dc, dr])
+        .filter(([nc, nr]) => nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS && !seen.has(nc + ',' + nr));
+      if (!opts.length) { stack.pop(); continue; }
+      const [nc, nr, dc, dr] = opts[(rand() * opts.length) | 0];
+      if (dc === 1) v[c + 1][r] = false; else if (dc === -1) v[c][r] = false;
+      else if (dr === 1) h[c][r + 1] = false; else h[c][r] = false;
+      seen.add(nc + ',' + nr);
+      stack.push([nc, nr]);
+    }
+    // se abren mas pasos para que haya vueltas (en un shooter no conviene un solo camino)
+    for (let c = 1; c < COLS; c++) for (let r = 0; r < ROWS; r++) if (v[c][r] && rand() < 0.18) v[c][r] = false;
+    for (let c = 0; c < COLS; c++) for (let r = 1; r < ROWS; r++) if (h[c][r] && rand() < 0.15) h[c][r] = false;
+    // claros para las torres (2 celdas de ancho, con cerco arriba y abajo y salidas a los costados)
+    // claro de 3 x 2 celdas: sin cercos adentro, con cerco alrededor y dos entradas
+    const clearing = (r0, inA, inB) => {
+      for (let c = 1; c <= 3; c++) { h[c][r0] = true; h[c][r0 + 2] = true; h[c][r0 + 1] = false; }
+      for (let r = r0; r <= r0 + 1; r++) { v[2][r] = false; v[3][r] = false; v[1][r] = true; v[4][r] = true; }
+      v[1][inA] = false; v[4][inB] = false;
+    };
+    clearing(1, 1, 2);
+    clearing(7, 8, 7);
+    // claro del centro (con la fuente)
+    h[5][5] = false;
+    // salidas desde la base y hacia el centro
+    const open = [1, 4, 5, 8];
+    for (let r = 0; r < ROWS; r++) { v[0][r] = !open.includes(r); v[COLS][r] = !open.includes(r); }
+
+    const L = { walls: [], ramps: [], deco: [] }, C = { walls: [], ramps: [], deco: [] };
+    const hedge = (x, y, w, hh, list) => list.push({ x, y, w, h: hh, z: HZ, k: 'hedge' });
+    const xs = (c) => X0 + c * cw;
+    const ys = (r) => r * ch;
+    // los tramos no se pisan entre si: en cada cruce va un "poste" (si no, los techos parpadean)
+    const post = new Set();
+    for (let c = 0; c <= COLS; c++) for (let r = 0; r < ROWS; r++) {
+      if (!v[c][r]) continue;
+      const list = c === COLS ? C.walls : L.walls; // la linea del medio no se espeja (quedaria doble)
+      const y0 = r === 0 ? 0 : ys(r) + T / 2, y1 = r === ROWS - 1 ? H : ys(r + 1) - T / 2;
+      hedge(xs(c) - T / 2, y0, T, y1 - y0, list);
+      if (r > 0) post.add(c + ',' + r);
+      if (r < ROWS - 1) post.add(c + ',' + (r + 1));
+    }
+    for (let c = 0; c < COLS; c++) for (let r = 1; r < ROWS; r++) {
+      if (!h[c][r]) continue;
+      hedge(xs(c) + T / 2, ys(r) - T / 2, cw - T, T, L.walls);
+      post.add(c + ',' + r); post.add((c + 1) + ',' + r);
+    }
+    for (const k of post) {
+      const [c, r] = k.split(',').map(Number);
+      hedge(xs(c) - T / 2, ys(r) - T / 2, T, T, c === COLS ? C.walls : L.walls);
+    }
+    // torres: una en el claro de arriba (contra el cerco de arriba) y otra en el de abajo
+    const S = 96, TZ = 140, RL = 300, RW = 50;
+    const tx = xs(4) - T / 2 - 14 - S;
+    const tTop = ys(1) + T / 2 + 4, tBot = ys(9) - T / 2 - 4 - S;
+    merge(L, tower(tx, tTop, S, TZ, { side: 'w', gap: { from: tTop + 7, to: tTop + 7 + RW }, ramp: { x: tx - RL, y: tTop + 7, w: RL, h: RW, axis: 'x', dir: 1 } }));
+    merge(L, tower(tx, tBot, S, TZ, { side: 'w', gap: { from: tBot + S - 7 - RW, to: tBot + S - 7 }, ramp: { x: tx - RL, y: tBot + S - 7 - RW, w: RL, h: RW, axis: 'x', dir: 1 } }));
+    // base: arboles y arbustos
+    const trees = [[90, 130], [90, H - 130], [210, 340], [210, H - 340]];
+    for (const [x, y] of trees) {
+      L.deco.push({ t: 'tree', x, y });
+      L.walls.push({ x: x - 8, y: y - 8, w: 16, h: 16, z: 90, k: 'trunk' });
+    }
+    L.deco.push({ t: 'bush', x: 270, y: 560 }, { t: 'bush', x: 270, y: 1040 }, { t: 'bush', x: 40, y: 470 }, { t: 'bush', x: 40, y: 1130 });
+    // senderos de piedritas en los claros de las torres
+    L.deco.push({ t: 'floor', x: xs(1) + T / 2, y: ys(1) + T / 2, w: 3 * cw - T, h: 2 * ch - T, tex: 'gravel' });
+    L.deco.push({ t: 'floor', x: xs(1) + T / 2, y: ys(7) + T / 2, w: 3 * cw - T, h: 2 * ch - T, tex: 'gravel' });
+    // centro: claro con una fuente (cobertura baja)
+    C.deco.push({ t: 'floor', x: X1 - cw + T / 2, y: ys(4) + T / 2, w: 2 * cw - T, h: 2 * ch - T, tex: 'gravel' });
+    C.walls.push({ x: X1 - 60, y: H / 2 - 60, w: 120, h: 120, z: 45, k: 'fountain' });
+
+    return {
+      id: 'garden', name: 'Laberinto', desc: 'Pasillos de plantas altas y 4 torres para ver todo desde arriba.',
+      W, H, walls: [...C.walls, ...mirror(W, L.walls)], ramps: mirror(W, L.ramps), deco: [...C.deco, ...mirror(W, L.deco)], theme: 'garden',
+      spawns: { red: { x: 50, y: 600, w: 200, h: 400 }, blue: { x: W - 250, y: 600, w: 200, h: 400 } },
+    };
+  }
+
+  const MAPS = { desert: makeDesert(), warehouse: makeWarehouse(), town: makeTown(), garden: makeGarden() };
   const MAP_IDS = Object.keys(MAPS);
 
   // ---------- Fisica con alturas ----------

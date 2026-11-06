@@ -265,6 +265,27 @@ const TEX = {
       g.fillRect(x + 2, y + 2, 28, 28);
     }
   }),
+  grass: () => canvasTex('grass', 256, (g, s) => {
+    g.fillStyle = '#5f9e3f'; g.fillRect(0, 0, s, s);
+    noise(g, s, 2600, ['rgba(140,200,90,0.45)', 'rgba(40,95,30,0.35)', 'rgba(110,170,70,0.5)']);
+    g.strokeStyle = 'rgba(170,220,120,0.35)'; g.lineWidth = 1.2;
+    for (let i = 0; i < 220; i++) {
+      const x = rnd(0, s), y = rnd(0, s);
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + rnd(-2, 2), y - rnd(3, 7)); g.stroke();
+    }
+  }),
+  hedge: () => canvasTex('hedge', 256, (g, s) => {
+    g.fillStyle = '#2f6e2a'; g.fillRect(0, 0, s, s);
+    noise(g, s, 5200, ['rgba(80,150,60,0.8)', 'rgba(25,70,25,0.7)', 'rgba(110,180,80,0.6)', 'rgba(60,120,45,0.8)'], 0.3, 0.9);
+    // hojitas
+    for (let i = 0; i < 520; i++) {
+      const l = rnd(-25, 25);
+      g.fillStyle = `rgba(${70 + l},${140 + l},${55 + l * 0.5},0.85)`;
+      g.beginPath();
+      g.ellipse(rnd(0, s), rnd(0, s), rnd(2, 4), rnd(1, 2.2), rnd(0, Math.PI), 0, Math.PI * 2);
+      g.fill();
+    }
+  }),
   stone: () => canvasTex('stone', 128, (g, s) => {
     g.fillStyle = '#8f8a83'; g.fillRect(0, 0, s, s);
     for (let y = 0; y < s; y += 32) for (let x = (y / 32) % 2 ? -24 : 0; x < s; x += 48) {
@@ -317,6 +338,11 @@ const THEMES = {
     sky: 0x1b1e23, fogNear: 1000, fogFar: 3400, hemi: [0xfff4e0, 0x50545c, 2.4], sun: [0xfff6e8, 0.7],
     floor: 'concrete', floorTile: 260, border: { tex: 'metal', tile: 120, h: 330, c: 0xa9b6c4 }, ceiling: 330,
   },
+  garden: {
+    skyTop: '#4a9be8', skyMid: '#a3d2f5', skyLow: '#e8f6e0',
+    sky: 0xb3dcf2, fogNear: 1000, fogFar: 3600, hemi: [0xf2ffe8, 0x3f6a32, 2.4], sun: [0xfff6dc, 2.2],
+    floor: 'grass', floorTile: 240, border: { tex: 'hedge', tile: 120, h: 190, c: 0xffffff },
+  },
   town: {
     skyTop: '#3d8ee6', skyMid: '#8fc6f2', skyLow: '#dff0fb',
     sky: 0x9fcbf0, fogNear: 1000, fogFar: 3600, hemi: [0xeaf4ff, 0x5c6a50, 2.4], sun: [0xfff4e0, 2.1],
@@ -328,7 +354,7 @@ const THEMES = {
 const ROUNDNESS = {
   rock: 18, crate: 7, fruitCrate: 7, pallet: 5, dumpster: 9, planter: 9, fountain: 16, kiosk: 9,
   counter: 5, container: 8, cab: 12, forklift: 12, partition: 6, rack: 4, building: 5, parapet: 2.5,
-  shopWall: 4, shopRoof: 3, balcony: 3, pillar: 6, platform: 4,
+  shopWall: 4, shopRoof: 3, balcony: 3, pillar: 6, platform: 4, hedge: 12, tower: 6, battlement: 2,
 };
 
 // ---------- Materiales por tipo de objeto ----------
@@ -371,6 +397,9 @@ function materialFor(w) {
       return [[glass, glass, lam('car' + c, { color: c }), glass, glass, glass], 'fit'];
     }
     case 'planter': return [lam('planter', { map: TEX.brick(), color: 0xd8c8b8 }), 50];
+    case 'hedge': return [lam('hedge', { map: TEX.hedge() }), 110];
+    case 'tower': return [lam('tower', { map: TEX.stone(), color: 0xe6dccb }), 64];
+    case 'battlement': return [lam('battlement', { map: TEX.stone(), color: 0xcfc4b2 }), 40];
     case 'fountain': return [lam('fountain', { map: TEX.stone() }), 60];
     case 'kiosk': return [lam('kiosk' + c, { map: TEX.planks(), color: c }), 60];
     default: return [lam('default', { color: 0x999999 }), 'fit'];
@@ -1061,6 +1090,11 @@ export function createWorld(scene, hemi, sun, teamHex) {
       const zb = w.zb || 0; // objetos elevados (balcon, baranda del balcon)
       box(group, w.x, w.y, w.w, w.h, zb, w.z - zb, mat, tile, ROUNDNESS[w.k] ?? 5);
       // detalles extra
+      if (w.k === 'tower') {
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(w.w - 4, 3, w.h - 4), lam('deck', { map: TEX.planks(), color: 0xd9b98a }));
+        deck.position.set(w.x + w.w / 2, w.z + 1, w.y + w.h / 2);
+        group.add(deck);
+      }
       if (w.k === 'planter') {
         const plants = new THREE.Mesh(new THREE.BoxGeometry(w.w - 8, 14, w.h - 8), lam('plants', { color: 0x4f8a3c }));
         plants.position.set(w.x + w.w / 2, w.z + 5, w.y + w.h / 2);
@@ -1079,7 +1113,9 @@ export function createWorld(scene, hemi, sun, teamHex) {
     }
 
     // escaleras
-    const stairMat = MAP.theme === 'warehouse' ? lam('platform', { map: TEX.grate() }) : lam('stairs', { map: TEX.concrete(), color: 0xd8d0c2 });
+    const stairMat = MAP.theme === 'warehouse' ? lam('platform', { map: TEX.grate() })
+      : MAP.theme === 'garden' ? lam('woodStairs', { map: TEX.planks(), color: 0xc9a777 })
+      : lam('stairs', { map: TEX.concrete(), color: 0xd8d0c2 });
     for (const r of MAP.ramps) addStairs(group, r, stairMat);
 
     // muros del borde
@@ -1122,6 +1158,8 @@ export function minimapColor(w) {
     case 'rack': case 'partition': return 'rgba(255,255,255,0.35)';
     case 'container': case 'cab': return 'rgba(140,180,230,0.5)';
     case 'platform': return 'rgba(255,220,120,0.35)';
+    case 'hedge': return 'rgba(60,150,60,0.85)';
+    case 'tower': case 'battlement': return 'rgba(230,220,200,0.8)';
     case 'crate': case 'pallet': case 'counter': return 'rgba(210,160,100,0.55)';
     default: return 'rgba(255,255,255,0.28)';
   }

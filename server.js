@@ -615,6 +615,70 @@ function freeDirection(p, goal) {
   return goal + Math.PI;
 }
 
+// ---- Navegacion de los bots ----
+// Grilla del mapa a nivel del piso (libre / bloqueado) y camino mas corto con BFS.
+// Sirve para que no se traben contra las paredes (sobre todo en el laberinto).
+const NAV_G = 30;
+const navCache = {};
+function navGrid() {
+  if (navCache[MAP.id]) return navCache[MAP.id];
+  const cols = Math.ceil(MAP.W / NAV_G), rows = Math.ceil(MAP.H / NAV_G);
+  const free = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x = (c + 0.5) * NAV_G, y = (r + 0.5) * NAV_G;
+    free[r * cols + c] = x > P_R && y > P_R && x < MAP.W - P_R && y < MAP.H - P_R && !MAP.blocked(x, y, 0, P_R - 4) ? 1 : 0;
+  }
+  return (navCache[MAP.id] = { cols, rows, free, dist: new Int32Array(cols * rows) });
+}
+// Proximo punto del camino desde (x, y) hacia (tx, ty), o null si no hay camino por el piso
+function navNext(x, y, tx, ty) {
+  const N = navGrid();
+  const cell = (px, py) => clamp(Math.floor(py / NAV_G), 0, N.rows - 1) * N.cols + clamp(Math.floor(px / NAV_G), 0, N.cols - 1);
+  const s = cell(x, y), t = cell(tx, ty);
+  if (!N.free[s] || !N.free[t]) return null;
+  if (s === t) return { x: tx, y: ty };
+  const D = N.dist;
+  D.fill(-1);
+  D[t] = 0;
+  const q = [t];
+  for (let i = 0; i < q.length && D[s] < 0; i++) {
+    const k = q[i], c = k % N.cols, r = (k / N.cols) | 0;
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nc = c + dc, nr = r + dr;
+      if (nc < 0 || nr < 0 || nc >= N.cols || nr >= N.rows) continue;
+      const n = nr * N.cols + nc;
+      if (D[n] >= 0 || !N.free[n]) continue;
+      D[n] = D[k] + 1;
+      q.push(n);
+    }
+  }
+  if (D[s] < 0) return null;
+  // se camina por el camino; se apunta 3 celdas adelante para que no zigzaguee
+  let k = s;
+  for (let step = 0; step < 3 && D[k] > 0; step++) {
+    const c = k % N.cols, r = (k / N.cols) | 0;
+    let best = k;
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nc = c + dc, nr = r + dr;
+      if (nc < 0 || nr < 0 || nc >= N.cols || nr >= N.rows) continue;
+      const n = nr * N.cols + nc;
+      if (D[n] >= 0 && D[n] < D[best]) best = n;
+    }
+    if (best === k) break;
+    k = best;
+  }
+  return { x: (k % N.cols + 0.5) * NAV_G, y: (((k / N.cols) | 0) + 0.5) * NAV_G };
+}
+// Direccion para ir hacia (tx, ty) siguiendo el camino (se recalcula cada tanto)
+function navAngle(p, tx, ty, now) {
+  const b = p.bot;
+  if (!b.nav || now >= b.navAt || Math.hypot(b.nav.x - p.x, b.nav.y - p.y) < 18) {
+    b.nav = (p.z || 0) < 5 ? navNext(p.x, p.y, tx, ty) : null;
+    b.navAt = now + 350;
+  }
+  return b.nav ? Math.atan2(b.nav.y - p.y, b.nav.x - p.x) : Math.atan2(ty - p.y, tx - p.x);
+}
+
 function botThink(R, p, now) {
   const b = p.bot;
   p.input.shoot = false;
@@ -646,7 +710,7 @@ function botThink(R, p, now) {
 
   let goal;
   if (!target) {
-    goal = Math.atan2(MAP.H / 2 - p.y, MAP.W / 2 - p.x);
+    goal = navAngle(p, MAP.W / 2, MAP.H / 2, now);
   } else {
     const ang = Math.atan2(target.y - p.y, target.x - p.x);
     const visible = now >= (p.blindUntil || 0) && td < BOT.sight && canSee(p, target); // encegecido no ve
@@ -667,7 +731,7 @@ function botThink(R, p, now) {
       else goal = ang + b.strafe * Math.PI / 2;
     } else {
       b.reactAt = 0;
-      goal = ang;
+      goal = navAngle(p, target.x, target.y, now);
       p.input.a = ang;
     }
   }
