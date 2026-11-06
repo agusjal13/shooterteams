@@ -36,7 +36,9 @@ const P_R = MAP.P_R; // radio del jugador
 const SPEED = MAP.SPEED; // px por segundo
 const WEAPONS = MAP.WEAPONS;
 const RESPAWN_MS = 3000;
-const PROTECT_MS = 1500;
+const PROTECT_MS = 1500; // Guerra: proteccion corta al aparecer
+const PROTECT_TDM_MS = 5000; // DeathMatch: 5 s invencible para poder comprar (se corta si dispara)
+const FREEZE_MS = 4000; // Guerra: al arrancar cada ronda nadie se mueve ni dispara, se puede comprar
 const ROUND_END_MS = 3500; // cartel de "gano la ronda" (modo Guerra)
 const MATCH_END_MS = 9000; // cartel de fin de partida antes de arrancar otra
 const ASSIST_ANGLE = 0.3; // radianes (~17 grados) de ayuda de apuntado
@@ -255,7 +257,7 @@ function spawn(R, p) {
   p.a = p.team === 'red' ? 0 : Math.PI;
   p.input.a = p.a;
   p.input.p = 0;
-  p.protectUntil = Date.now() + PROTECT_MS;
+  p.protectUntil = Date.now() + (R.match.mode === 'tdm' ? PROTECT_TDM_MS : PROTECT_MS);
   if (p.isBot) botAutoBuy(p);
 }
 
@@ -280,7 +282,7 @@ function startMatch(R, mode, minutes, mapId) {
   m.mode = mode === 'elim' ? 'elim' : 'tdm';
   m.minutes = clamp(Math.round(Number(minutes) || 5), 1, MAP.MAX_MINUTES);
   m.endsAt = now + m.minutes * 60000;
-  m.phase = 'playing';
+  setStartPhase(m, now);
   m.rounds = { red: 0, blue: 0 };
   m.round = 1;
   m.banner = '';
@@ -316,10 +318,16 @@ function changeMap(R, mapId) {
   return true;
 }
 
+// En Guerra cada ronda arranca con unos segundos congelados para comprar
+function setStartPhase(m, now) {
+  if (m.mode === 'elim') { m.phase = 'freeze'; m.phaseUntil = now + FREEZE_MS; }
+  else m.phase = 'playing';
+}
+
 function startRound(R) {
   const m = R.match;
   m.round++;
-  m.phase = 'playing';
+  setStartPhase(m, Date.now());
   m.banner = '';
   m.bannerTeam = null;
   R.bullets = [];
@@ -694,6 +702,7 @@ function tryShoot(R, p, now) {
   const wp = WEAPONS[p.weapon] || WEAPONS[0];
   if (!p.input.shoot || now - p.lastShot < wp.rate) return;
   p.lastShot = now;
+  p.protectUntil = 0; // si dispara pierde la proteccion de recien aparecido
   let a = p.a;
 
   // Ayuda de apuntado: si hay un enemigo visible cerca de la mira, apunta a el.
@@ -743,6 +752,7 @@ function tryShoot(R, p, now) {
 
 function updatePhase(R, now) {
   const m = R.match;
+  if (m.phase === 'freeze' && now >= m.phaseUntil) m.phase = 'playing';
   if (m.phase === 'playing' && now >= m.endsAt) endMatch(R, now);
   else if (m.phase === 'roundEnd' && now >= m.phaseUntil) {
     if (now >= m.endsAt) endMatch(R, now);

@@ -2144,8 +2144,25 @@ function drawHUD(now, meP) {
     }
   }
 
+  // Guerra: segundos congelados al empezar la ronda para comprar
+  if (m.ph === 'freeze') {
+    const secs = Math.ceil(m.pl / 1000);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 30px system-ui, sans-serif';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    const t1 = `Ronda ${m.rn || 1}: ¡a comprar!`;
+    ctx.strokeText(t1, W / 2, H * 0.32);
+    ctx.fillStyle = '#f2c94c';
+    ctx.fillText(t1, W / 2, H * 0.32);
+    ctx.font = 'bold 22px system-ui, sans-serif';
+    const t2 = `Arranca en ${secs}…`;
+    ctx.strokeText(t2, W / 2, H * 0.32 + 32);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(t2, W / 2, H * 0.32 + 32);
+  }
   // Carteles de fin de ronda / fin de partida
-  if (m.ph !== 'playing') {
+  if (m.ph !== 'playing' && m.ph !== 'freeze') {
     const end = m.ph === 'matchEnd';
     ctx.fillStyle = end ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.4)';
     ctx.fillRect(0, 0, W, H);
