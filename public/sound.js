@@ -284,6 +284,39 @@ export function boom(water, dist = 0, pan = 0) {
   }
 }
 
+// Flashbang: estallido seco y agudo (sin bola de fuego)
+export function flash(dist = 0, pan = 0) {
+  if (!ctx || muted || ctx.state !== 'running') return;
+  const v = Math.max(fall(dist, 3200), dist < 4000 ? 0.05 : 0);
+  if (v < 0.02) return;
+  const t = ctx.currentTime;
+  const dest = out(0.9 * v, pan, 0.35);
+  noiseBurst(dest, t, 0.35, 'highpass', 1800, 600, 0.7, 1, 0.002);
+  tone(dest, t, 0.18, 'square', 2400, 700, 0.35, 0.002);
+  tone(dest, t, 0.4, 'sine', 160, 50, 0.7, 0.003);
+}
+// Aturdido: pitido agudo y todo lo demas se escucha bajito hasta que se pasa
+export function stun(ms) {
+  if (!ctx || muted || ctx.state !== 'running') return;
+  const t = ctx.currentTime, dur = ms / 1000;
+  const dest = out(0.22, 0);
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(3600, t);
+  o.frequency.linearRampToValueAtTime(3300, t + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(1, t + 0.05);
+  g.gain.setValueAtTime(1, t + dur * 0.45);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(dest);
+  o.start(t); o.stop(t + dur + 0.05);
+  sfxBus.gain.cancelScheduledValues(t);
+  sfxBus.gain.setValueAtTime(0.12, t + 0.02);
+  sfxBus.gain.setValueAtTime(0.12, t + dur * 0.45);
+  sfxBus.gain.linearRampToValueAtTime(0.8, t + dur);
+}
+
 // ---------- musica de lobby ----------
 const BPM = 92;
 const BEAT = 60 / BPM;

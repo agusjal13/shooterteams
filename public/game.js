@@ -301,7 +301,8 @@ function backToMenu(step) {
   myId = null;
   pred.ok = false;
   touchShoot = mouseShoot = false;
-  fireId = null; joy.id = null; look.id = null;
+  fireId = null; joy.id = null; look.id = null; gHold.id = null; gHold.open = false;
+  setRank(false); blindMs = 0;
   document.querySelectorAll('.modal').forEach((m) => m.classList.remove('open'));
   if (document.pointerLockElement) document.exitPointerLock();
   document.body.classList.remove('playing');
@@ -502,7 +503,8 @@ function renderShop(force) {
   document.getElementById('coinsShop').textContent = '$' + coins;
   document.getElementById('shopWarn').style.display = me && !inBase ? 'block' : 'none';
   const grs = me ? me.gr : 0;
-  const key = coins + '|' + owned + '|' + eq + '|' + grs + '|' + inBase;
+  const fbs = me ? me.fb || 0 : 0;
+  const key = coins + '|' + owned + '|' + eq + '|' + grs + '|' + fbs + '|' + inBase;
   if (!force && (key === shopKey || !shop.classList.contains('open'))) return;
   shopKey = key;
   shopList.innerHTML = '';
@@ -547,6 +549,22 @@ function renderShop(force) {
   btn.onclick = () => { btn.blur(); socket.emit('buyGrenade'); };
   card.appendChild(btn);
   shopList.appendChild(card);
+
+  // Flashbang: mismo precio y maximo que la granada
+  const fcard = document.createElement('div');
+  fcard.className = 'wcard' + (fbs ? ' eq' : '');
+  fcard.innerHTML = `
+    <div class="top"><span class="nm">⚡ Flash</span><span class="pr">$${G.price}</span></div>
+    <div class="ds">No lastima: deja ciegos a los enemigos que lo miran. Mantené apretada la granada para elegirlo.</div>
+    <div class="stat"><span>Tenés</span><b>${fbs} / ${G.max}</b></div>`;
+  const fbtn = document.createElement('button');
+  if (fbs >= G.max) { fbtn.textContent = 'Llevás el máximo'; fbtn.disabled = true; }
+  else if (!inBase) { fbtn.textContent = 'En tu base'; fbtn.className = 'buy'; fbtn.disabled = true; }
+  else if (coins >= G.price) { fbtn.textContent = `Comprar $${G.price}`; fbtn.className = 'buy'; }
+  else { fbtn.textContent = `Faltan $${G.price - coins}`; fbtn.className = 'buy'; fbtn.disabled = true; }
+  fbtn.onclick = () => { fbtn.blur(); socket.emit('buyGrenade', { f: 1 }); };
+  fcard.appendChild(fbtn);
+  shopList.appendChild(fcard);
 }
 
 // que la barra espaciadora (disparo en PC) no vuelva a apretar botones
@@ -643,6 +661,43 @@ socket.on('teamChanged', (d) => {
   pred.ok = false; // reaparece en la otra base
   if (joinData) joinData.team = d.team;
 });
+// ---------- Ranking de la partida ----------
+// Se abre tocando 🏆; se cierra tocando de nuevo, tocando el cuadro o deslizando el dedo sobre el.
+const rankEl = document.getElementById('rank');
+const rankBtn = document.getElementById('rankBtn');
+let rankOpen = false, rankKey = '';
+function setRank(open) {
+  rankOpen = open;
+  rankEl.classList.toggle('open', open);
+  rankBtn.classList.toggle('abierto', open);
+  if (open) { rankKey = ''; renderRank(); }
+}
+rankBtn.addEventListener('click', (e) => { e.stopPropagation(); setRank(!rankOpen); rankBtn.blur(); });
+let rankTouch = null;
+rankEl.addEventListener('pointerdown', (e) => { rankTouch = { x: e.clientX, y: e.clientY }; });
+rankEl.addEventListener('pointermove', (e) => {
+  if (rankTouch && Math.hypot(e.clientX - rankTouch.x, e.clientY - rankTouch.y) > 25) { rankTouch = null; setRank(false); }
+});
+rankEl.addEventListener('pointerup', () => { if (rankTouch) setRank(false); rankTouch = null; });
+rankEl.addEventListener('pointercancel', () => { rankTouch = null; });
+function renderRank() {
+  if (!rankOpen || !state) return;
+  const ps = state.p.slice().sort((a, b) => b.k - a.k || a.d - b.d || a.n.localeCompare(b.n));
+  const key = ps.map((p) => p.id + p.k + '.' + p.d + '.' + p.al + '.' + p.c + '.' + p.t).join('|') + (state.s ? state.s.red + '-' + state.s.blue : '');
+  if (key === rankKey) return;
+  rankKey = key;
+  const elim = state.m && state.m.mo === 'elim';
+  const team = (t) => {
+    const list = ps.filter((p) => p.t === t);
+    const rows = list.map((p) => `<tr class="${p.id === myId ? 'yo' : ''}${p.al ? '' : ' muerto'}">
+      <td>${p.bt ? `<span class="bot">${escapeHtml(p.n)}</span>` : escapeHtml(p.n)}</td><td>${p.k}</td><td>${p.d}</td><td>$${p.c}</td></tr>`).join('');
+    const pts = state.s ? state.s[t] : 0;
+    return `<div class="${t}"><h4><span>${t === 'red' ? 'Rojo' : 'Azul'}</span><span>${elim ? 'Rondas' : 'Bajas'} ${pts}</span></h4>
+      <table><tr><th>Jugador</th><th>Bajas</th><th>Muertes</th><th>Plata</th></tr>${rows || '<tr><td colspan="4">—</td></tr>'}</table></div>`;
+  };
+  rankEl.innerHTML = `<div class="cols2">${team('red')}${team('blue')}</div><div class="hint">Tocá o deslizá para cerrar</div>`;
+}
+
 socket.on('state', (s) => {
   // Cambio de mapa: se arma el escenario nuevo
   if (s.m && s.m.mp && s.m.mp !== MAP.id) {
@@ -653,6 +708,7 @@ socket.on('state', (s) => {
   }
   state = s;
   stateAt = performance.now();
+  renderRank();
   for (const p of s.p) {
     let d = disp[p.id];
     if (!d) d = disp[p.id] = { x: p.x, y: p.y, z: p.z || 0, a: p.a, hp: p.hp, hitAt: 0, al: p.al };
@@ -777,11 +833,40 @@ function doJump() {
 }
 
 let lastThrowAt = -1e9;
-function throwGrenade() {
+function throwGrenade(flash) {
   const now = performance.now();
   if (now - lastThrowAt < MAP.GRENADE.cooldown) return;
   lastThrowAt = now;
-  socket.emit('throw');
+  socket.emit('throw', { f: !!flash });
+}
+// Boton de granada: un toque tira la granada; manteniendolo apretado aparecen arriba las opciones
+// (granada y flash) y se elige deslizando el dedo hasta una y soltando.
+const HOLD_MS = 260;
+const gHold = { id: null, at: 0, open: false, sel: null };
+function grenadeOpts() {
+  const gb = grenadeBtn();
+  const r = gb.r * 0.95;
+  return [
+    { kind: 'gr', x: gb.x, y: gb.y - gb.r - r - 14, r },
+    { kind: 'fb', x: gb.x, y: gb.y - gb.r - 3 * r - 26, r },
+  ];
+}
+function pickOpt(x, y) {
+  for (const o of grenadeOpts()) if (Math.hypot(x - o.x, y - o.y) < o.r * 1.35) return o.kind;
+  return null;
+}
+function myCounts() {
+  const meP = state && state.p.find((q) => q.id === myId);
+  return { gr: meP ? meP.gr || 0 : 0, fb: meP ? meP.fb || 0 : 0 };
+}
+function releaseGrenade() {
+  const c = myCounts();
+  if (gHold.open) {
+    if (gHold.sel === 'fb' && c.fb) throwGrenade(true);
+    else if (gHold.sel === 'gr' && c.gr) throwGrenade(false);
+  } else if (c.gr) throwGrenade(false);
+  else if (c.fb) throwGrenade(true); // sin granadas, el toque tira el flash
+  gHold.id = null; gHold.open = false; gHold.sel = null;
 }
 
 hud.addEventListener('touchstart', (e) => {
@@ -792,7 +877,7 @@ hud.addEventListener('touchstart', (e) => {
     const jb = jumpBtn();
     const onFire = Math.hypot(t.clientX - fb.x, t.clientY - fb.y) < fb.r * 1.4;
     if (Math.hypot(t.clientX - gb.x, t.clientY - gb.y) < gb.r * 1.25) {
-      throwGrenade();
+      if (gHold.id === null) { gHold.id = t.identifier; gHold.at = performance.now(); gHold.open = false; gHold.sel = null; }
     } else if (Math.hypot(t.clientX - jb.x, t.clientY - jb.y) < jb.r * 1.2) {
       doJump();
       jumpPressedAt = performance.now();
@@ -817,6 +902,11 @@ hud.addEventListener('touchstart', (e) => {
 hud.addEventListener('touchmove', (e) => {
   e.preventDefault();
   for (const t of e.changedTouches) {
+    if (t.identifier === gHold.id) {
+      if (!gHold.open && performance.now() - gHold.at >= HOLD_MS) gHold.open = true;
+      if (gHold.open) gHold.sel = pickOpt(t.clientX, t.clientY);
+      continue;
+    }
     if (t.identifier === joy.id) {
       let dx = t.clientX - joy.ox;
       let dy = t.clientY - joy.oy;
@@ -849,6 +939,10 @@ hud.addEventListener('touchmove', (e) => {
 function touchEnd(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
+    if (t.identifier === gHold.id) {
+      if (!gHold.open && performance.now() - gHold.at >= HOLD_MS) { gHold.open = true; gHold.sel = pickOpt(t.clientX, t.clientY); }
+      if (e.type === 'touchcancel') { gHold.id = null; gHold.open = false; } else releaseGrenade();
+    }
     if (t.identifier === joy.id) { joy.id = null; joy.jx = joy.jy = 0; }
     if (t.identifier === fireId) { fireId = null; touchShoot = false; }
     if (t.identifier === look.id) look.id = null;
@@ -864,7 +958,9 @@ addEventListener('keydown', (e) => {
     if (!e.repeat && myId && document.activeElement !== nameInput) doJump(); // espacio = saltar
   }
   keys[e.code] = true;
-  if (e.code === 'KeyG' && myId && document.activeElement !== nameInput) throwGrenade();
+  if (e.code === 'KeyG' && myId && document.activeElement !== nameInput) throwGrenade(false);
+  if (e.code === 'KeyH' && myId && document.activeElement !== nameInput) throwGrenade(true);
+  if (e.code === 'Tab' && myId) { e.preventDefault(); if (!e.repeat) setRank(!rankOpen); }
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 hud.addEventListener('mousedown', () => {
@@ -1297,13 +1393,23 @@ function getBullet(i) {
 }
 
 // Granadas: el azul tira bombuchas (globos de agua) y el rojo bombas de fuego
-const grenadePools = [[], []]; // [0] fuego (rojo), [1] bombucha (azul)
+const grenadePools = [[], [], []]; // [0] fuego (rojo), [1] bombucha (azul), [2] flash
 const balloonMat = new THREE.MeshPhongMaterial({ color: 0x3fa9ff, shininess: 140, specular: 0xffffff, transparent: true, opacity: 0.8 });
 const fireBombMat = new THREE.MeshPhongMaterial({ color: 0xb3261e, shininess: 60, specular: 0x553333 });
 const flameMat = new THREE.MeshBasicMaterial({ color: 0xffb020 });
 function makeGrenadeModel(kind) {
   const g = new THREE.Group();
-  if (kind === 1) {
+  if (kind === 2) {
+    // flash: lata gris con franja amarilla y anillo arriba
+    const can = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 12, 12), new THREE.MeshPhongMaterial({ color: 0x9aa3ad, shininess: 90, specular: 0xffffff }));
+    g.add(can);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.4, 3, 12), new THREE.MeshBasicMaterial({ color: 0xffd23f }));
+    g.add(band);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(2.4, 0.6, 6, 12), new THREE.MeshPhongMaterial({ color: 0xd0d6dc }));
+    ring.position.y = 8;
+    g.add(ring);
+    g.userData.led = null;
+  } else if (kind === 1) {
     // bombucha: globo un poco alargado con el nudito arriba
     const ball = new THREE.Mesh(new THREE.SphereGeometry(7, 14, 12), balloonMat);
     ball.scale.set(1, 1.15, 1);
@@ -1372,7 +1478,46 @@ socket.on('boom', (b) => {
   const h = hearFrom(b.x, b.y);
   snd.boom(water, h.d, h.pan);
 });
+// Flash: destello blanco en el lugar; si me encegueció el servidor manda 'flashed'
+socket.on('flash', (b) => {
+  const now = performance.now();
+  const fire = new THREE.Mesh(blastGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, depthWrite: false }));
+  fire.position.set(b.x, Math.max(10, b.z), b.y);
+  scene.add(fire);
+  flashes.push({ m: fire, at: now });
+  const h = hearFrom(b.x, b.y);
+  snd.flash(h.d, h.pan);
+});
+const flashes = [];
+let blindAt = 0, blindMs = 0;
+const flashOv = document.getElementById('flashOv');
+socket.on('flashed', (ms) => {
+  blindAt = performance.now();
+  blindMs = ms;
+  snd.stun(ms);
+});
+function updateFlash(now) {
+  for (let i = flashes.length - 1; i >= 0; i--) {
+    const f = flashes[i];
+    const t = (now - f.at) / 380;
+    if (t >= 1) { scene.remove(f.m); f.m.material.dispose(); flashes.splice(i, 1); continue; }
+    f.m.scale.setScalar(20 + t * 140);
+    f.m.material.opacity = 1 - t;
+  }
+  // pantalla blanca: a full el primer 45% del tiempo y despues se va aclarando
+  let o = 0;
+  if (blindMs) {
+    const t = (now - blindAt) / blindMs;
+    if (t >= 1) blindMs = 0;
+    else o = t < 0.45 ? 1 : 1 - (t - 0.45) / 0.55;
+  }
+  const meP = state && state.p.find((q) => q.id === myId);
+  if (meP && !meP.al) o = 0;
+  const v = o ? o.toFixed(3) : '0';
+  if (flashOv.style.opacity !== v) flashOv.style.opacity = v;
+}
 function updateBlasts(now) {
+  updateFlash(now);
   const R = MAP.GRENADE.radius;
   for (let i = blasts.length - 1; i >= 0; i--) {
     const b = blasts[i];
@@ -1503,16 +1648,17 @@ function update3D(now, meP, dt) {
   for (; i < bulletPool.length; i++) bulletPool[i].visible = false;
 
   // Granadas: bombuchas que se bambolean y bombas de fuego con la llamita titilando
-  const used = [0, 0];
-  for (const [, x, y, z, left, kind] of state.g || []) {
-    const k = kind === 1 ? 1 : 0;
+  const used = [0, 0, 0];
+  for (const [, x, y, z, left, kind, fl] of state.g || []) {
+    const k = fl ? 2 : kind === 1 ? 1 : 0;
     const g = getGrenade(k, used[k]++);
     g.visible = true;
     g.position.set(x, z, y);
-    if (k === 1) g.rotation.z = Math.sin(now / 90) * 0.25;
+    if (k === 2) { g.rotation.x = now / 120; g.rotation.z = now / 170; }
+    else if (k === 1) g.rotation.z = Math.sin(now / 90) * 0.25;
     else g.userData.led.scale.setScalar(0.7 + 0.5 * (Math.floor(now / Math.max(50, left / 6)) % 2));
   }
-  for (const k of [0, 1]) for (let j = used[k]; j < grenadePools[k].length; j++) grenadePools[k][j].visible = false;
+  for (const k of [0, 1, 2]) for (let j = used[k]; j < grenadePools[k].length; j++) grenadePools[k][j].visible = false;
   updateBlasts(now);
 
   // Sacudon de camara por explosion cercana
@@ -1735,7 +1881,7 @@ function drawHUD(now, meP) {
       ctx.font = 'bold 13px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.textAlign = 'left';
-      ctx.fillText((MAP.WEAPONS[meP.w] || MAP.WEAPONS[0]).name + (meP.gr ? `  ·  ${meP.t === 'blue' ? '💦' : '🔥'} x${meP.gr}${isTouch ? '' : ' (G)'}` : ''), bx, by - 8);
+      ctx.fillText((MAP.WEAPONS[meP.w] || MAP.WEAPONS[0]).name + (meP.gr ? `  ·  ${meP.t === 'blue' ? '💦' : '🔥'} x${meP.gr}${isTouch ? '' : ' (G)'}` : '') + (meP.fb ? `  ·  ⚡ x${meP.fb}${isTouch ? '' : ' (H)'}` : ''), bx, by - 8);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#f2c94c';
       ctx.fillText('$' + meP.c, bx + bw, by - 8);
@@ -1798,7 +1944,7 @@ function drawHUD(now, meP) {
     ctx.textAlign = 'center';
     ctx.font = '14px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.fillText('Click: capturar mouse y disparar  ·  Espacio: saltar  ·  G: granada  ·  B: tienda  ·  Esc: soltar', W / 2, H - 70);
+    ctx.fillText('Click: capturar mouse y disparar  ·  Espacio: saltar  ·  G: granada  ·  H: flash  ·  Tab: ranking  ·  B: tienda  ·  Esc: soltar', W / 2, H - 70);
   }
 }
 
@@ -1820,8 +1966,10 @@ function drawControls() {
   // Boton de granada (con la cantidad que tenes)
   const meP = state && state.p.find((p) => p.id === myId);
   const grs = meP ? meP.gr : 0;
+  const fbs = meP ? meP.fb || 0 : 0;
   const gb = grenadeBtn();
-  ctx.globalAlpha = grs ? 0.9 : 0.35;
+  if (gHold.id !== null && !gHold.open && performance.now() - gHold.at >= HOLD_MS) gHold.open = true;
+  ctx.globalAlpha = grs || fbs ? 0.9 : 0.35;
   const water = meP && meP.t === 'blue';
   ctx.fillStyle = water ? 'rgba(40,120,200,0.75)' : 'rgba(200,80,30,0.75)';
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
@@ -1835,7 +1983,33 @@ function drawControls() {
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 13px system-ui, sans-serif';
   ctx.fillText('x' + grs, gb.x + gb.r * 0.75, gb.y + gb.r + 4);
+  if (fbs) {
+    ctx.fillStyle = '#ffe37a';
+    ctx.fillText('⚡' + fbs, gb.x - gb.r * 0.8, gb.y + gb.r + 4);
+  }
   ctx.globalAlpha = 1;
+  // selector (mantener apretado): granada abajo, flash arriba
+  if (gHold.open) {
+    for (const o of grenadeOpts()) {
+      const n = o.kind === 'fb' ? fbs : grs;
+      const sel = gHold.sel === o.kind;
+      ctx.globalAlpha = n ? 1 : 0.4;
+      ctx.fillStyle = o.kind === 'fb' ? (sel ? 'rgba(255,225,90,0.95)' : 'rgba(70,74,82,0.85)') : (sel ? (water ? 'rgba(80,170,255,0.95)' : 'rgba(255,120,50,0.95)') : (water ? 'rgba(40,120,200,0.8)' : 'rgba(200,80,30,0.8)'));
+      ctx.strokeStyle = sel ? '#fff' : 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = sel ? 4 : 2.5;
+      ctx.beginPath(); ctx.arc(o.x, o.y, o.r * (sel ? 1.12 : 1), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.font = `${Math.round(o.r * 0.9)}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(o.kind === 'fb' ? '⚡' : (water ? '💦' : '🔥'), o.x, o.y + 1);
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText((o.kind === 'fb' ? 'Flash ' : 'Granada ') + 'x' + n, o.x - o.r - 8, o.y + 4);
+    }
+    ctx.globalAlpha = 1;
+  }
 
   // Boton de saltar
   const jb = jumpBtn();
@@ -1940,7 +2114,6 @@ function frame() {
 
   drawCrosshair(meP);
   drawPopups(now);
-  drawMinimap(meP);
   drawHUD(now, meP);
   drawControls();
 }

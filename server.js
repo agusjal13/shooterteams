@@ -217,7 +217,7 @@ function newPlayer(id, name, team, isBot, style) {
     x: 0, y: 0, z: 0, vz: 0, a: 0, hp: 100, alive: true,
     kills: 0, deaths: 0, lastShot: 0, respawnAt: 0, protectUntil: 0,
     coins: MAP.START_COINS, owned: 1, weapon: 0, // owned = armas compradas (bits)
-    grenades: 0, lastThrow: 0,
+    grenades: 0, flashes: 0, lastThrow: 0, blindUntil: 0,
     input: { mx: 0, my: 0, a: 0, p: 0, shoot: false },
   };
 }
@@ -279,6 +279,7 @@ function startMatch(R, mode, minutes, mapId) {
     p.owned = 1;
     p.weapon = 0;
     p.grenades = 0;
+    p.flashes = 0;
     spawn(R, p);
   }
 }
@@ -372,20 +373,21 @@ function buyOrEquip(R, p, w) {
   return null;
 }
 
-function buyGrenade(R, p) {
+function buyGrenade(R, p, flash) {
   if (!canShop(R, p)) return 'Solo podés comprar en tu base';
-  if (p.grenades >= GR.max) return `Máximo ${GR.max} granadas`;
+  const has = flash ? p.flashes : p.grenades;
+  if (has >= GR.max) return `Máximo ${GR.max} ${flash ? 'flashes' : 'granadas'}`;
   if (p.coins < GR.price) return `Te faltan $${GR.price - p.coins}`;
   p.coins -= GR.price;
-  p.grenades++;
+  if (flash) p.flashes++; else p.grenades++;
   return null;
 }
 
-function throwGrenade(R, p, now) {
-  if (!p.alive || p.grenades <= 0 || R.match.phase !== 'playing' || now - p.lastThrow < GR.cooldown) return;
+function throwGrenade(R, p, now, flash) {
+  if (!p.alive || (flash ? p.flashes : p.grenades) <= 0 || R.match.phase !== 'playing' || now - p.lastThrow < GR.cooldown) return;
   useMap(R);
   p.lastThrow = now;
-  p.grenades--;
+  if (flash) p.flashes--; else p.grenades--;
   const a = p.input.a;
   // La mira se traduce en angulo de tiro: mirando recto sale con ~20 grados,
   // y mirando bien arriba sale a 45 grados (el angulo de mayor alcance).
@@ -399,7 +401,7 @@ function throwGrenade(R, p, now) {
   R.grenades.push({
     id: ++R.grenadeId, x, y, z: z0,
     vx: Math.cos(a) * hs, vy: Math.sin(a) * hs, vz: Math.sin(pitch) * GR.throwSpeed,
-    owner: p.id, team: p.team, explodeAt: now + GR.fuse,
+    owner: p.id, team: p.team, explodeAt: now + (flash ? GR.fuse * 0.7 : GR.fuse), f: !!flash,
   });
   emit(R, 'thr', [Math.round(x), Math.round(y)]); // sonido de tirar la granada
 }
@@ -431,7 +433,28 @@ function updateGrenades(R, now) {
   R.grenades = keep;
 }
 
+// Flashbang: enceguece a los enemigos que lo pueden ver (mas si lo miran de frente y estan cerca)
+function flashBang(R, g, now) {
+  const F = MAP.FLASH;
+  emit(R, 'flash', { x: Math.round(g.x), y: Math.round(g.y), z: Math.round(g.z) });
+  for (const id in R.players) {
+    const q = R.players[id];
+    if (!q.alive || q.team === g.team) continue; // a tu equipo no lo ciega
+    const qz = (q.z || 0) + MAP.EYE_H;
+    const d = Math.hypot(q.x - g.x, q.y - g.y, qz - g.z);
+    if (d > F.radius) continue;
+    if (!MAP.los(g.x, g.y, g.z + 6, q.x, q.y, qz)) continue; // detras de una pared no te ciega
+    const look = Math.cos(angleDiff(Math.atan2(g.y - q.y, g.x - q.x), q.a));
+    const facing = look > 0.5 ? 1 : look > -0.1 ? 0.6 : 0.3; // de espaldas casi no te afecta
+    const ms = Math.round(F.maxMs * facing * (1 - 0.65 * (d / F.radius)));
+    if (ms < F.minMs) continue;
+    q.blindUntil = Math.max(q.blindUntil || 0, now + ms);
+    if (!q.isBot) io.to(q.id).emit('flashed', ms);
+  }
+}
+
 function explode(R, g, now) {
+  if (g.f) return flashBang(R, g, now);
   emit(R, 'boom', { x: Math.round(g.x), y: Math.round(g.y), z: Math.round(g.z), t: g.team });
   const thrower = R.players[g.owner];
   for (const id in R.players) {
@@ -600,7 +623,7 @@ function botThink(R, p, now) {
     goal = Math.atan2(MAP.H / 2 - p.y, MAP.W / 2 - p.x);
   } else {
     const ang = Math.atan2(target.y - p.y, target.x - p.x);
-    const visible = td < BOT.sight && canSee(p, target);
+    const visible = now >= (p.blindUntil || 0) && td < BOT.sight && canSee(p, target); // encegecido no ve
     if (visible) {
       if (!b.reactAt) {
         b.reactAt = now + BOT.reactMin + Math.random() * (BOT.reactMax - BOT.reactMin);
@@ -813,7 +836,7 @@ function tickRoom(R, now) {
       sf: now - p.lastShot < 70,
       q: p.input.q || 0,
       bt: !!p.isBot,
-      w: p.weapon, c: p.coins, o: p.owned, gr: p.grenades, sy: p.style,
+      w: p.weapon, c: p.coins, o: p.owned, gr: p.grenades, fb: p.flashes, sy: p.style,
       pg: Math.round(p.rtt || 0), // demora (ping) en ms
     });
   }
@@ -821,7 +844,7 @@ function tickRoom(R, now) {
     p: list,
     b: R.bullets.map((b) => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), b.team === 'red' ? 0 : 1, Math.round(b.z), Math.round(b.vz)]),
     s: R.score,
-    g: R.grenades.map((g) => [g.id, Math.round(g.x), Math.round(g.y), Math.round(g.z), Math.max(0, g.explodeAt - now), g.team === 'red' ? 0 : 1]),
+    g: R.grenades.map((g) => [g.id, Math.round(g.x), Math.round(g.y), Math.round(g.z), Math.max(0, g.explodeAt - now), g.team === 'red' ? 0 : 1, g.f ? 1 : 0]),
     m: {
       mo: m.mode,
       min: m.minutes,
@@ -1053,16 +1076,16 @@ io.on('connection', (socket) => {
     checkElimination(R, Date.now());
   });
 
-  socket.on('buyGrenade', () => {
+  socket.on('buyGrenade', (data) => {
     const { R, p } = here();
     if (!p) return;
-    const err = buyGrenade(R, p);
+    const err = buyGrenade(R, p, !!(data && data.f));
     if (err) socket.emit('feed', err);
   });
 
-  socket.on('throw', () => {
+  socket.on('throw', (data) => {
     const { R, p } = here();
-    if (p) throwGrenade(R, p, Date.now());
+    if (p) throwGrenade(R, p, Date.now(), !!(data && data.f));
   });
 
   socket.on('buy', (data) => {

@@ -159,7 +159,7 @@
     #rotate .icon { font-size: 54px; animation: spin 2s ease-in-out infinite; }
     @keyframes spin { 0%,30% { transform: rotate(0); } 60%,100% { transform: rotate(90deg); } }
     /* Botones arriba a la izquierda (debajo del minimapa) */
-    #tools { position: fixed; left: calc(12px + env(safe-area-inset-left)); top: 122px; z-index: 5; display: none; gap: 6px; flex-direction: column; align-items: flex-start; }
+    #tools { position: fixed; left: calc(12px + env(safe-area-inset-left)); top: 12px; z-index: 5; display: none; gap: 6px; flex-direction: column; align-items: flex-start; }
     body.playing #tools { display: flex; }
     #tools .toolsRow { display: flex; gap: 8px; align-items: center; }
     #tools #menuBtn { font-size: 20px; line-height: 1; padding: 7px 12px; }
@@ -171,6 +171,30 @@
     #updBtn.nueva { background: #2e9d4f; border-color: #7dffa0; animation: latido 1.2s ease-in-out infinite; }
     @keyframes latido { 50% { transform: scale(1.07); } }
     #verTag { position: fixed; bottom: 6px; right: 10px; z-index: 30; font: 11px system-ui, sans-serif; color: rgba(255,255,255,.45); pointer-events: none; }
+    #tools #rankBtn { font-size: 18px; line-height: 1; padding: 7px 10px; }
+    #tools #rankBtn.abierto { background: rgba(120,90,10,.85); border-color: #f2c94c; }
+    #rank {
+      position: fixed; top: 82px; left: 50%; transform: translateX(-50%); z-index: 6; display: none;
+      width: min(560px, calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+      max-height: calc(100vh - 160px); overflow: hidden; background: rgba(10,14,20,.86); border: 1px solid rgba(255,255,255,.18);
+      border-radius: 14px; padding: 10px 12px 8px; font: 13px system-ui, sans-serif; color: #fff; touch-action: none;
+    }
+    #rank.open { display: block; animation: rankIn .14s ease-out; }
+    @keyframes rankIn { from { opacity: 0; transform: translate(-50%, -8px); } }
+    #rank .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    #rank h4 { margin: 0 0 4px; font-size: 14px; display: flex; justify-content: space-between; }
+    #rank .red h4 { color: #ff6b78; } #rank .blue h4 { color: #6ea8ff; }
+    #rank table { width: 100%; border-collapse: collapse; }
+    #rank th { font-weight: 600; color: #9aa4b2; font-size: 11px; text-align: right; padding: 1px 3px; }
+    #rank th:first-child, #rank td:first-child { text-align: left; }
+    #rank td { padding: 3px; text-align: right; white-space: nowrap; border-top: 1px solid rgba(255,255,255,.07); }
+    #rank td:first-child { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+    #rank tr.yo td { background: rgba(255,255,255,.12); font-weight: 700; }
+    #rank tr.muerto td { opacity: .5; }
+    #rank .bot { color: #39ff6a; font-weight: 800; }
+    #rank .hint { text-align: center; color: #7d8794; font-size: 11px; margin-top: 6px; }
+    body:not(.playing) #rank, body:not(.playing) #flashOv { display: none !important; }
+    #flashOv { position: fixed; inset: 0; z-index: 4; background: #fff; opacity: 0; pointer-events: none; }
     #pingTag { font: 700 14px system-ui, sans-serif; color: #9aa4b2; background: rgba(10,14,20,.7); border-radius: 8px; padding: 4px 10px; pointer-events: none; }
     #tools button, .sheet button {
       font: 600 14px system-ui, sans-serif; color: #fff; border: 1px solid rgba(255,255,255,.3);
@@ -324,7 +348,7 @@
   </div>
 
   <div id="tools">
-    <div class="toolsRow"><button id="menuBtn" aria-label="Menú">☰</button><div id="pingTag">📶 …</div></div>
+    <div class="toolsRow"><button id="menuBtn" aria-label="Menú">☰</button><button id="rankBtn" aria-label="Ranking">🏆</button><div id="pingTag">📶 …</div></div>
     <div id="toolsMenu">
       <button id="matchBtn">⚙️ Partida</button>
       <button id="botsBtn">🤖 Bots</button>
@@ -333,6 +357,10 @@
     </div>
   </div>
   <button id="shopBtn">🛒 Tienda</button>
+  <!-- Ranking de la partida: se abre tocando 🏆 y se cierra tocando o deslizando el dedo -->
+  <div id="rank"></div>
+  <!-- Pantalla blanca del flashbang -->
+  <div id="flashOv"></div>
 
   <div class="modal" id="exitAsk">
     <div class="sheet" style="max-width:340px;text-align:center">
