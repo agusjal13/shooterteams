@@ -121,12 +121,49 @@ const fall = (d, range) => {
 };
 
 // ---------- efectos ----------
+// Gota/burbuja: un tono corto que SUBE rapido (asi suenan de verdad las burbujas y las gotas)
+function bubble(dest, t, f, vol, dur = 0.05) {
+  tone(dest, t, dur, 'sine', f, f * (1.8 + Math.random() * 0.8), vol, 0.003);
+}
+
+// Chorro de agua: "shhh" suave que chisporrotea (el volumen salta al azar, como el agua saliendo
+// a borbotones) + burbujitas/gotas desparramadas
+function squirt(dest, t, dur, f0, f1, q, peak) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer();
+  const f = ctx.createBiquadFilter();
+  f.type = 'bandpass';
+  f.Q.value = q;
+  f.frequency.setValueAtTime(f0, t);
+  f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  const soft = ctx.createBiquadFilter(); // le saca el "siseo" agudo
+  soft.type = 'lowpass';
+  soft.frequency.value = 3200;
+  const g = ctx.createGain();
+  const n = 32;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const k = i / (n - 1);
+    const env = k < 0.08 ? k / 0.08 : Math.pow(1 - (k - 0.08) / 0.92, 1.6);
+    curve[i] = peak * env * (0.45 + Math.random() * 0.55);
+  }
+  curve[n - 1] = 0;
+  g.gain.setValueCurveAtTime(curve, t, dur);
+  src.connect(f);
+  f.connect(soft);
+  soft.connect(g);
+  g.connect(dest);
+  src.start(t, Math.random() * 0.9);
+  src.stop(t + dur + 0.05);
+}
+
 // Una forma de sonar por arma (mismo orden que MAP.WEAPONS)
+// dur: largo del chorro, f0/f1: tono del chorro (de mas agudo a mas grave), bub: cantidad de gotas
 const GUNS = [
-  { dur: 0.09, f0: 3400, f1: 1500, q: 1.3, vol: 0.32, blup: 950 }, // Chorrito
-  { dur: 0.13, f0: 2700, f1: 900, q: 1.0, vol: 0.45, blup: 620 }, // Pistola de agua
-  { dur: 0.24, f0: 2100, f1: 480, q: 0.6, vol: 0.55, blup: 420 }, // Regadera (abanico)
-  { dur: 0.07, f0: 2900, f1: 1300, q: 1.5, vol: 0.28, blup: 780 }, // Hidrometralleta
+  { dur: 0.11, f0: 1600, f1: 1000, q: 0.9, vol: 0.4, bub: 2, bf: 1100 }, // Chorrito
+  { dur: 0.16, f0: 1300, f1: 750, q: 0.8, vol: 0.5, bub: 3, bf: 800 }, // Pistola de agua
+  { dur: 0.28, f0: 1500, f1: 600, q: 0.5, vol: 0.55, bub: 6, bf: 700 }, // Regadera (abanico)
+  { dur: 0.08, f0: 1500, f1: 1000, q: 0.9, vol: 0.34, bub: 1, bf: 950 }, // Hidrometralleta
 ];
 
 export function shot(weapon, dist = 0, pan = 0) {
@@ -135,10 +172,12 @@ export function shot(weapon, dist = 0, pan = 0) {
   if (v < 0.02) return;
   const G = GUNS[weapon] || GUNS[0];
   const t = ctx.currentTime;
-  const r = 0.92 + Math.random() * 0.16; // cada tiro suena un poquito distinto
+  const r = 0.9 + Math.random() * 0.2; // cada tiro suena un poquito distinto
   const dest = out(G.vol * v, pan);
-  noiseBurst(dest, t, G.dur, 'bandpass', G.f0 * r, G.f1 * r, G.q, 0.9);
-  tone(dest, t, G.dur * 0.9, 'sine', G.blup * r * 1.7, G.blup * r, 0.3); // "pfiu" del agua
+  squirt(dest, t, G.dur, G.f0 * r, G.f1 * r, G.q, 1);
+  for (let i = 0; i < G.bub; i++) {
+    bubble(dest, t + 0.01 + Math.random() * G.dur, G.bf * (0.7 + Math.random() * 0.7), 0.16, 0.035 + Math.random() * 0.03);
+  }
 }
 
 // tirar una granada: un "fuuu" corto
