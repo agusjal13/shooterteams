@@ -1862,18 +1862,22 @@ function updateHeroAvatar(a, p, d, now, dt) {
   const walking = sp > 0.5;
   a.mv += ((walking ? 1 : 0) - a.mv) * Math.min(1, dt * 10);
   if (walking) a.walk += dt * 11;
-  const air = (d.z || 0) > 2;
+  // en el aire = por encima del piso que tiene abajo (parado arriba de una caja o del balcon NO es estar en el aire)
+  const gz = MAP.groundAt(d.x, d.y, d.z || 0);
+  const air = (d.z || 0) > gz + 4;
   a.seenAlive = true;
   // animacion de base segun lo que hace: en el aire, trotando (para atras la pasa al reves), caminando o quieto
   const v = dt > 0 ? sp / dt : 0;
   a.v = (a.v || 0) + (v - (a.v || 0)) * Math.min(1, dt * 8);
   if (air) heroPlay(a.hero, 'Jump_Loop', 0.15);
-  else if (a.v > 40) {
+  else if (a.v > (a.cur === 'Idle_Loop' ? 45 : 25)) { // umbral con margen: no titila entre quieto y caminando
     const back = sp > 0.5 && ((d.x - (a.px ?? d.x)) * Math.cos(d.a) + (d.y - (a.py ?? d.y)) * Math.sin(d.a)) < -0.3 * sp;
     if (sp > 0.5) a.back = back;
-    if (a.v < 130) heroPlay(a.hero, 'Walk_Loop', 0.2, (a.back ? -1 : 1) * Math.max(0.7, a.v / 90));
-    else heroPlay(a.hero, 'Jog_Fwd_Loop', 0.2, (a.back ? -1 : 1) * Math.min(1.7, Math.max(0.9, a.v / 180)));
-  } else heroPlay(a.hero, 'Idle_Loop', 0.25);
+    const jog = a.v > (a.cur === 'Jog_Fwd_Loop' ? 110 : 150);
+    if (!jog) heroPlay(a.hero, 'Walk_Loop', 0.3, (a.back ? -1 : 1) * Math.max(0.7, a.v / 90));
+    else heroPlay(a.hero, 'Jog_Fwd_Loop', 0.3, (a.back ? -1 : 1) * Math.min(1.35, Math.max(0.9, a.v / 210)));
+  } else heroPlay(a.hero, 'Idle_Loop', 0.35);
+  a.cur = a.hero.cur;
   a.px = d.x; a.py = d.y;
   const t = now / 1000 + a.phase;
   if (!a.hero.mixer) a.body.position.y = walking && !air ? Math.abs(Math.sin(a.walk)) * 1.6 : Math.sin(t * 2.2) * 0.3;
