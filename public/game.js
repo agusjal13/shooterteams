@@ -662,24 +662,27 @@ socket.on('teamChanged', (d) => {
   if (joinData) joinData.team = d.team;
 });
 // ---------- Ranking de la partida ----------
-// Se abre tocando 🏆; se cierra tocando de nuevo, tocando el cuadro o deslizando el dedo sobre el.
+// Se ve solo mientras se mantiene apretado 🏆 (en PC: con el mouse encima o manteniendo Tab).
+// Al soltar se cierra solo y se sigue jugando.
 const rankEl = document.getElementById('rank');
 const rankBtn = document.getElementById('rankBtn');
 let rankOpen = false, rankKey = '';
 function setRank(open) {
+  if (open === rankOpen) return;
   rankOpen = open;
   rankEl.classList.toggle('open', open);
   rankBtn.classList.toggle('abierto', open);
   if (open) { rankKey = ''; renderRank(); }
 }
-rankBtn.addEventListener('click', (e) => { e.stopPropagation(); setRank(!rankOpen); rankBtn.blur(); });
-let rankTouch = null;
-rankEl.addEventListener('pointerdown', (e) => { rankTouch = { x: e.clientX, y: e.clientY }; });
-rankEl.addEventListener('pointermove', (e) => {
-  if (rankTouch && Math.hypot(e.clientX - rankTouch.x, e.clientY - rankTouch.y) > 25) { rankTouch = null; setRank(false); }
-});
-rankEl.addEventListener('pointerup', () => { if (rankTouch) setRank(false); rankTouch = null; });
-rankEl.addEventListener('pointercancel', () => { rankTouch = null; });
+let rankPtr = null;
+rankBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); rankPtr = e.pointerId; setRank(true); });
+const rankRelease = (e) => { if (e.pointerId === rankPtr) { rankPtr = null; setRank(false); } };
+addEventListener('pointerup', rankRelease, true);
+addEventListener('pointercancel', rankRelease, true);
+rankBtn.addEventListener('mouseenter', () => setRank(true));
+rankBtn.addEventListener('mouseleave', () => { if (rankPtr === null) setRank(false); });
+rankBtn.addEventListener('contextmenu', (e) => e.preventDefault()); // mantener apretado no abre el menu del celular
+addEventListener('blur', () => { rankPtr = null; setRank(false); });
 function renderRank() {
   if (!rankOpen || !state) return;
   const ps = state.p.slice().sort((a, b) => b.k - a.k || a.d - b.d || a.n.localeCompare(b.n));
@@ -695,7 +698,7 @@ function renderRank() {
     return `<div class="${t}"><h4><span>${t === 'red' ? 'Rojo' : 'Azul'}</span><span>${elim ? 'Rondas' : 'Bajas'} ${pts}</span></h4>
       <table><tr><th>Jugador</th><th>Bajas</th><th>Muertes</th><th>Plata</th></tr>${rows || '<tr><td colspan="4">—</td></tr>'}</table></div>`;
   };
-  rankEl.innerHTML = `<div class="cols2">${team('red')}${team('blue')}</div><div class="hint">Tocá o deslizá para cerrar</div>`;
+  rankEl.innerHTML = `<div class="cols2">${team('red')}${team('blue')}</div><div class="hint">Soltá 🏆 para seguir jugando</div>`;
 }
 
 socket.on('state', (s) => {
@@ -839,10 +842,11 @@ function throwGrenade(flash) {
   lastThrowAt = now;
   socket.emit('throw', { f: !!flash });
 }
-// Boton de granada: un toque tira la granada; manteniendolo apretado aparecen arriba las opciones
-// (granada y flash) y se elige deslizando el dedo hasta una y soltando.
+// Boton de granada: un toque tira lo que esta elegido (granada o flash). Manteniendolo apretado
+// aparecen arriba las opciones; deslizando el dedo hasta una y soltando queda elegida (no la tira).
 const HOLD_MS = 260;
 const gHold = { id: null, at: 0, open: false, sel: null };
+let gKind = 'gr'; // lo que tira el boton con un toque: 'gr' granada, 'fb' flash
 function grenadeOpts() {
   const gb = grenadeBtn();
   const r = gb.r * 0.95;
@@ -862,10 +866,12 @@ function myCounts() {
 function releaseGrenade() {
   const c = myCounts();
   if (gHold.open) {
-    if (gHold.sel === 'fb' && c.fb) throwGrenade(true);
-    else if (gHold.sel === 'gr' && c.gr) throwGrenade(false);
-  } else if (c.gr) throwGrenade(false);
-  else if (c.fb) throwGrenade(true); // sin granadas, el toque tira el flash
+    if (gHold.sel) gKind = gHold.sel; // solo elige; se tira con el proximo toque
+  } else {
+    // toque: tira lo elegido; si no queda de eso, tira lo otro
+    const flash = gKind === 'fb' ? c.fb > 0 || !c.gr : !c.gr && c.fb > 0;
+    if (flash ? c.fb : c.gr) throwGrenade(flash);
+  }
   gHold.id = null; gHold.open = false; gHold.sel = null;
 }
 
@@ -960,9 +966,12 @@ addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyG' && myId && document.activeElement !== nameInput) throwGrenade(false);
   if (e.code === 'KeyH' && myId && document.activeElement !== nameInput) throwGrenade(true);
-  if (e.code === 'Tab' && myId) { e.preventDefault(); if (!e.repeat) setRank(!rankOpen); }
+  if (e.code === 'Tab' && myId) { e.preventDefault(); setRank(true); }
 });
-addEventListener('keyup', (e) => { keys[e.code] = false; });
+addEventListener('keyup', (e) => {
+  keys[e.code] = false;
+  if (e.code === 'Tab') setRank(false);
+});
 hud.addEventListener('mousedown', () => {
   if (isTouch) return;
   if (document.pointerLockElement !== hud && hud.requestPointerLock) {
@@ -1969,30 +1978,35 @@ function drawControls() {
   const fbs = meP ? meP.fb || 0 : 0;
   const gb = grenadeBtn();
   if (gHold.id !== null && !gHold.open && performance.now() - gHold.at >= HOLD_MS) gHold.open = true;
-  ctx.globalAlpha = grs || fbs ? 0.9 : 0.35;
   const water = meP && meP.t === 'blue';
-  ctx.fillStyle = water ? 'rgba(40,120,200,0.75)' : 'rgba(200,80,30,0.75)';
+  // el boton muestra lo elegido (si no queda de eso pero si de lo otro, muestra lo otro)
+  const showFb = gKind === 'fb' ? fbs > 0 || !grs : !grs && fbs > 0;
+  const mainN = showFb ? fbs : grs, otherN = showFb ? grs : fbs;
+  ctx.globalAlpha = mainN ? 0.9 : 0.35;
+  ctx.fillStyle = showFb ? 'rgba(200,170,40,0.8)' : water ? 'rgba(40,120,200,0.75)' : 'rgba(200,80,30,0.75)';
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
   ctx.lineWidth = 2.5;
   ctx.beginPath(); ctx.arc(gb.x, gb.y, gb.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   ctx.font = `${Math.round(gb.r * 0.9)}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(water ? '💦' : '🔥', gb.x, gb.y + 1); // bombucha (azul) o bomba de fuego (rojo)
-  ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#fff';
+  ctx.fillText(showFb ? '⚡' : water ? '💦' : '🔥', gb.x, gb.y + 1); // flash, bombucha (azul) o bomba de fuego (rojo)
+  ctx.textBaseline = 'alphabetic';
   ctx.font = 'bold 13px system-ui, sans-serif';
-  ctx.fillText('x' + grs, gb.x + gb.r * 0.75, gb.y + gb.r + 4);
-  if (fbs) {
-    ctx.fillStyle = '#ffe37a';
-    ctx.fillText('⚡' + fbs, gb.x - gb.r * 0.8, gb.y + gb.r + 4);
-  }
+  ctx.fillText('x' + mainN, gb.x + gb.r * 0.75, gb.y + gb.r + 4);
   ctx.globalAlpha = 1;
+  if (otherN) {
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = showFb ? '#ffffff' : '#ffe37a';
+    ctx.fillText((showFb ? (water ? '💦' : '🔥') : '⚡') + otherN, gb.x - gb.r * 0.8, gb.y + gb.r + 4);
+    ctx.globalAlpha = 1;
+  }
   // selector (mantener apretado): granada abajo, flash arriba
   if (gHold.open) {
     for (const o of grenadeOpts()) {
       const n = o.kind === 'fb' ? fbs : grs;
-      const sel = gHold.sel === o.kind;
+      const sel = gHold.sel ? gHold.sel === o.kind : gKind === o.kind;
       ctx.globalAlpha = n ? 1 : 0.4;
       ctx.fillStyle = o.kind === 'fb' ? (sel ? 'rgba(255,225,90,0.95)' : 'rgba(70,74,82,0.85)') : (sel ? (water ? 'rgba(80,170,255,0.95)' : 'rgba(255,120,50,0.95)') : (water ? 'rgba(40,120,200,0.8)' : 'rgba(200,80,30,0.8)'));
       ctx.strokeStyle = sel ? '#fff' : 'rgba(255,255,255,0.7)';

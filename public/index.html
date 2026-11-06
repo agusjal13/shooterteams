@@ -171,13 +171,13 @@
     #updBtn.nueva { background: #2e9d4f; border-color: #7dffa0; animation: latido 1.2s ease-in-out infinite; }
     @keyframes latido { 50% { transform: scale(1.07); } }
     #verTag { position: fixed; bottom: 6px; right: 10px; z-index: 30; font: 11px system-ui, sans-serif; color: rgba(255,255,255,.45); pointer-events: none; }
-    #tools #rankBtn { font-size: 18px; line-height: 1; padding: 7px 10px; }
+    #tools #rankBtn { font-size: 18px; line-height: 1; padding: 7px 10px; touch-action: none; -webkit-touch-callout: none; }
     #tools #rankBtn.abierto { background: rgba(120,90,10,.85); border-color: #f2c94c; }
     #rank {
       position: fixed; top: 82px; left: 50%; transform: translateX(-50%); z-index: 6; display: none;
       width: min(560px, calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)));
       max-height: calc(100vh - 160px); overflow: hidden; background: rgba(10,14,20,.86); border: 1px solid rgba(255,255,255,.18);
-      border-radius: 14px; padding: 10px 12px 8px; font: 13px system-ui, sans-serif; color: #fff; touch-action: none;
+      border-radius: 14px; padding: 10px 12px 8px; font: 13px system-ui, sans-serif; color: #fff; pointer-events: none;
     }
     #rank.open { display: block; animation: rankIn .14s ease-out; }
     @keyframes rankIn { from { opacity: 0; transform: translate(-50%, -8px); } }
