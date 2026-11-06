@@ -2,7 +2,7 @@
 // - Efectos: chorros de las pistolas de agua, tirar granada, bombucha y bomba de fuego.
 // - Musica de lobby: bossa tranquila tipo "musica de ascensor" mientras se espera en el menu.
 
-let ctx = null, master = null, sfxBus = null, musicBus = null;
+let ctx = null, master = null, sfxBus = null, musicBus = null, reverbIn = null;
 let muted = false;
 try { muted = localStorage.getItem('rva_mute') === '1'; } catch (e) {}
 
@@ -25,6 +25,19 @@ function ensure() {
     sfxBus = ctx.createGain();
     sfxBus.gain.value = 0.8;
     sfxBus.connect(master);
+    // reverberacion (eco de ambiente) para que los disparos no suenen secos
+    const verb = ctx.createConvolver();
+    const len = Math.floor(ctx.sampleRate * 1.4);
+    const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    }
+    verb.buffer = ir;
+    reverbIn = ctx.createGain();
+    reverbIn.gain.value = 0.6;
+    reverbIn.connect(verb);
+    verb.connect(sfxBus);
     // la musica pasa por un filtro que le saca brillo (suena mas calida y de fondo)
     const warm = ctx.createBiquadFilter();
     warm.type = 'lowpass';
@@ -66,9 +79,15 @@ function noiseBuffer() {
 }
 
 // salida de un efecto con su volumen y de que lado suena (izquierda -1 ... derecha 1)
-function out(vol, pan, bus = sfxBus) {
+function out(vol, pan, rev = 0, bus = sfxBus) {
   const g = ctx.createGain();
   g.gain.value = vol;
+  if (rev > 0 && reverbIn) {
+    const s = ctx.createGain();
+    s.gain.value = rev;
+    g.connect(s);
+    s.connect(reverbIn);
+  }
   if (pan && ctx.createStereoPanner) {
     const p = ctx.createStereoPanner();
     p.pan.value = Math.max(-1, Math.min(1, pan));
@@ -157,26 +176,78 @@ function squirt(dest, t, dur, f0, f1, q, peak) {
   src.stop(t + dur + 0.05);
 }
 
+// Caño: el sonido entra y rebota adentro de un tubo hueco (eco muy corto que se repite),
+// eso le da el timbre metalico/hueco de cañeria. f = nota del caño (mas grave = caño mas largo).
+// (en un circuito con rebote el navegador no deja ecos mas cortos que ~2.7 ms, por eso f <= 370)
+function pipe(dest, f, fb, life) {
+  const input = ctx.createGain();
+  const delay = ctx.createDelay(0.05);
+  delay.delayTime.value = 1 / Math.min(370, f);
+  const loop = ctx.createGain();
+  // el rebote se va apagando si o si (asi nunca se "acopla" y queda sonando)
+  const t = ctx.currentTime;
+  loop.gain.setValueAtTime(fb, t);
+  loop.gain.setTargetAtTime(0, t + life * 0.5, life * 0.15);
+  const damp = ctx.createBiquadFilter(); // cada rebote pierde un poco de agudos (suena a agua adentro)
+  damp.type = 'lowpass';
+  damp.frequency.value = 2600;
+  damp.Q.value = 0.5; // sin pico de resonancia
+  input.connect(dest);
+  input.connect(delay);
+  delay.connect(damp);
+  damp.connect(loop);
+  loop.connect(delay);
+  damp.connect(dest);
+  setTimeout(() => { input.disconnect(); loop.disconnect(); }, (life + 1) * 1000);
+  return input;
+}
+
 // Una forma de sonar por arma (mismo orden que MAP.WEAPONS)
-// dur: largo del chorro, f0/f1: tono del chorro (de mas agudo a mas grave), bub: cantidad de gotas
+// dur: largo del chorro, f0/f1: tono del chorro, caño: nota del tubo y cuanto resuena,
+// thump: golpe de presion al salir, rev: cuanto eco de ambiente
 const GUNS = [
-  { dur: 0.11, f0: 1600, f1: 1000, q: 0.9, vol: 0.4, bub: 2, bf: 1100 }, // Chorrito
-  { dur: 0.16, f0: 1300, f1: 750, q: 0.8, vol: 0.5, bub: 3, bf: 800 }, // Pistola de agua
-  { dur: 0.28, f0: 1500, f1: 600, q: 0.5, vol: 0.55, bub: 6, bf: 700 }, // Regadera (abanico)
-  { dur: 0.08, f0: 1500, f1: 1000, q: 0.9, vol: 0.34, bub: 1, bf: 950 }, // Hidrometralleta
+  { dur: 0.13, f0: 1500, f1: 800, cano: 360, fb: 0.72, vol: 0.5, thump: 160, rev: 0.12 }, // Chorrito
+  { dur: 0.18, f0: 1300, f1: 600, cano: 290, fb: 0.78, vol: 0.6, thump: 125, rev: 0.16 }, // Pistola de agua
+  null, // Regadera: tiene su propio sonido de escopeta (shotgun)
+  { dur: 0.09, f0: 1400, f1: 800, cano: 330, fb: 0.7, vol: 0.42, thump: 145, rev: 0.1 }, // Hidrometralleta
 ];
 
 export function shot(weapon, dist = 0, pan = 0) {
   if (!ctx || muted || ctx.state !== 'running') return;
   const v = fall(dist, 1700);
   if (v < 0.02) return;
+  if (weapon === 2) { shotgun(v, pan, dist === 0); return; }
   const G = GUNS[weapon] || GUNS[0];
   const t = ctx.currentTime;
-  const r = 0.9 + Math.random() * 0.2; // cada tiro suena un poquito distinto
-  const dest = out(G.vol * v, pan);
-  squirt(dest, t, G.dur, G.f0 * r, G.f1 * r, G.q, 1);
-  for (let i = 0; i < G.bub; i++) {
-    bubble(dest, t + 0.01 + Math.random() * G.dur, G.bf * (0.7 + Math.random() * 0.7), 0.16, 0.035 + Math.random() * 0.03);
+  const r = 0.92 + Math.random() * 0.16; // cada tiro suena un poquito distinto
+  const dest = out(G.vol * v, pan, G.rev + (1 - v) * 0.25); // de lejos, mas eco
+  // golpe de presion ("thunk") + chorro que pasa por el caño + una gota al final
+  tone(dest, t, 0.09, 'sine', G.thump * r, G.thump * 0.5, 0.6, 0.002);
+  const cano = pipe(dest, G.cano * r, G.fb, G.dur + 0.4);
+  squirt(cano, t, G.dur, G.f0 * r, G.f1 * r, 0.7, 0.8);
+  bubble(dest, t + G.dur * (0.5 + Math.random() * 0.5), 700 + Math.random() * 500, 0.12);
+}
+
+// Regadera = escopeta de agua: estallido grave con cuerpo, chorro grueso por un caño ancho,
+// eco de ambiente, lluvia de gotas y (si es mia) el "chk-chk" de recargar
+function shotgun(v, pan, mine) {
+  const t = ctx.currentTime;
+  const r = 0.94 + Math.random() * 0.12;
+  const dest = out(0.75 * v, pan, 0.4 + (1 - v) * 0.3);
+  tone(dest, t, 0.38, 'sine', 105 * r, 38, 1, 0.002); // golpe grave
+  tone(dest, t, 0.12, 'triangle', 220 * r, 90, 0.35, 0.002);
+  noiseBurst(dest, t, 0.5, 'lowpass', 5200, 280, 0.7, 0.85, 0.002); // estallido
+  const cano = pipe(dest, 210 * r, 0.7, 0.9);
+  squirt(cano, t + 0.01, 0.42, 1100 * r, 380, 0.5, 0.9); // chorro grueso
+  for (let i = 0; i < 7; i++) {
+    bubble(dest, t + 0.1 + Math.random() * 0.55, 500 + Math.random() * 900, 0.1, 0.04 + Math.random() * 0.04);
+  }
+  if (mine) {
+    const pump = out(0.32, 0, 0.08);
+    for (const [dt, f] of [[0.42, 1700], [0.56, 1300]]) {
+      noiseBurst(pump, t + dt, 0.05, 'bandpass', f, f * 0.8, 3, 1, 0.002);
+      tone(pump, t + dt, 0.03, 'square', f / 4, f / 5, 0.12, 0.001);
+    }
   }
 }
 
