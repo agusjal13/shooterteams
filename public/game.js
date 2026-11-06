@@ -712,6 +712,11 @@ socket.on('state', (s) => {
   state = s;
   stateAt = performance.now();
   renderRank();
+  // si estaba elegido el flash y no me quedan, vuelve a la granada (tambien queda granada si no tengo nada)
+  if (gKind === 'fb') {
+    const mine = s.p.find((q) => q.id === myId);
+    if (!mine || !mine.fb) gKind = 'gr';
+  }
   for (const p of s.p) {
     let d = disp[p.id];
     if (!d) d = disp[p.id] = { x: p.x, y: p.y, z: p.z || 0, a: p.a, hp: p.hp, hitAt: 0, al: p.al };
