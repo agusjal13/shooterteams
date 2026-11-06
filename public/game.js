@@ -1,7 +1,7 @@
 import * as THREE from '/vendor/three/three.module.js';
 import { createWorld, minimapColor, buildBlaster, toon, roundBox } from './world.js';
 import * as snd from './sound.js';
-import { loadHeroes, heroesReady, buildHero, poseHero } from './hero.js';
+import { loadHeroes, heroesReady, buildHero, poseHero, heroPlay } from './hero.js';
 
 const socket = io();
 const hud = document.getElementById('hud');
@@ -1764,6 +1764,7 @@ function update3D(now, meP, dt) {
     if (p.id === myId) continue;
     const a = getAvatar(p);
     const d = disp[p.id];
+    if (a.hero && heroDeath(a, p, now, dt)) continue;
     a.root.visible = p.al;
     if (!p.al) continue;
     a.root.position.set(d.x, d.z || 0, d.y);
@@ -1840,6 +1841,21 @@ function update3D(now, meP, dt) {
   }
 }
 
+// Muerto: se ve la animacion de caer unos segundos (sin arma ni cartel) y despues desaparece
+function heroDeath(a, p, now, dt) {
+  if (p.al) {
+    if (a.dead) { a.dead = false; a.gun.visible = true; a.label.sprite.visible = true; heroPlay(a.hero, 'Idle_Loop', 0); }
+    return false;
+  }
+  if (!a.dead) {
+    a.dead = true; a.deadAt = now;
+    a.gun.visible = false; a.label.sprite.visible = false;
+    heroPlay(a.hero, 'Death01', 0.1);
+  }
+  a.root.visible = !!(a.hero.mixer && a.seenAlive && now - a.deadAt < 2600);
+  if (a.root.visible) poseHero(a.hero, { dt, noGun: true });
+  return true;
+}
 function updateHeroAvatar(a, p, d, now, dt) {
   const sp = Math.hypot(d.x - a.lx, d.y - a.ly);
   a.lx = d.x; a.ly = d.y;
@@ -1847,12 +1863,24 @@ function updateHeroAvatar(a, p, d, now, dt) {
   a.mv += ((walking ? 1 : 0) - a.mv) * Math.min(1, dt * 10);
   if (walking) a.walk += dt * 11;
   const air = (d.z || 0) > 2;
+  a.seenAlive = true;
+  // animacion de base segun lo que hace: en el aire, trotando (para atras la pasa al reves), caminando o quieto
+  const v = dt > 0 ? sp / dt : 0;
+  a.v = (a.v || 0) + (v - (a.v || 0)) * Math.min(1, dt * 8);
+  if (air) heroPlay(a.hero, 'Jump_Loop', 0.15);
+  else if (a.v > 40) {
+    const back = sp > 0.5 && ((d.x - (a.px ?? d.x)) * Math.cos(d.a) + (d.y - (a.py ?? d.y)) * Math.sin(d.a)) < -0.3 * sp;
+    if (sp > 0.5) a.back = back;
+    if (a.v < 130) heroPlay(a.hero, 'Walk_Loop', 0.2, (a.back ? -1 : 1) * Math.max(0.7, a.v / 90));
+    else heroPlay(a.hero, 'Jog_Fwd_Loop', 0.2, (a.back ? -1 : 1) * Math.min(1.7, Math.max(0.9, a.v / 180)));
+  } else heroPlay(a.hero, 'Idle_Loop', 0.25);
+  a.px = d.x; a.py = d.y;
   const t = now / 1000 + a.phase;
-  a.body.position.y = walking && !air ? Math.abs(Math.sin(a.walk)) * 1.6 : Math.sin(t * 2.2) * 0.3;
+  if (!a.hero.mixer) a.body.position.y = walking && !air ? Math.abs(Math.sin(a.walk)) * 1.6 : Math.sin(t * 2.2) * 0.3;
   const squash = Math.max(0, 1 - (now - d.hitAt) / 180);
   a.body.scale.set(1 + squash * 0.06, 1 - squash * 0.08, 1 + squash * 0.06);
   if (a.w !== p.w) { a.w = p.w; setHeroGun(a, p.w); }
-  poseHero(a.hero, { walk: a.walk, moving: a.mv, air, pitch: p.pt || 0, gun: a.gun, grip: a.grip, support: a.support });
+  poseHero(a.hero, { dt, walk: a.walk, moving: a.mv, air, pitch: p.pt || 0, gun: a.gun, grip: a.grip, support: a.support });
   a.muzzle.visible = p.sf;
   const hit = now - d.hitAt < 110;
   for (const m of a.hero.flashMats) {

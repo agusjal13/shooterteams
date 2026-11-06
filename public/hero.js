@@ -9,6 +9,9 @@ import { toon } from './world.js';
 
 export const HERO_SCALE = 51; // el modelo viene en metros: 1.75 m → ~89 de alto (+ casco ≈ 94)
 const FILES = ['/models/hero_m.glb', '/models/hero_f.glb']; // estilo 0 y estilo 1
+const ANIMS = '/models/anims.glb'; // Universal Animation Library (Quaternius, CC0), solo las que usamos
+const MANNEQUIN_PELVIS = 0.9181; // largo de la traslacion de la cadera en el muñeco de las animaciones
+let animClips = [];
 const templates = [];
 let readyPromise = null;
 
@@ -46,8 +49,10 @@ const ARMOR = [
 export function loadHeroes() {
   if (readyPromise) return readyPromise;
   const loader = new GLTFLoader();
-  readyPromise = Promise.all(FILES.map((f) => loader.loadAsync(f))).then((gl) => {
-    gl.forEach((g, i) => (templates[i] = prepTemplate(g, i)));
+  // las animaciones son opcionales: si no cargan, se usa la pose por codigo
+  const anims = loader.loadAsync(ANIMS).then((g) => (animClips = g.animations)).catch(() => (animClips = []));
+  readyPromise = Promise.all([...FILES.map((f) => loader.loadAsync(f)), anims]).then((gl) => {
+    gl.slice(0, FILES.length).forEach((g, i) => (templates[i] = prepTemplate(g, i)));
     return true;
   });
   return readyPromise;
@@ -142,7 +147,19 @@ function prepTemplate(gltf, style) {
   const bonePos = {};
   skel.bones.forEach((b, i) => (bonePos[b.name] = boneLocal[i].toArray().map((x) => +x.toFixed(3))));
   const bb = new THREE.Box3().setFromBufferAttribute(pos);
-  return { bonePos, bb, scene, armorGeos, boxMin, boxMax, hc, hs, toHead, toHand, handPos: boneLocal[hand].clone(), clips: gltf.animations || [] };
+  return { bonePos, bb, scene, armorGeos, boxMin, boxMax, hc, hs, toHead, toHand, handPos: boneLocal[hand].clone(), clips: fitClips(scene) };
+}
+function fitClips(scene) {
+  let pel = null;
+  scene.traverse((o) => { if (o.isBone && o.name === 'pelvis') pel = o; });
+  const k = pel ? pel.position.length() / MANNEQUIN_PELVIS : 1;
+  const out = {};
+  for (const c of animClips) {
+    const cc = c.clone();
+    for (const t of cc.tracks) if (t.name.endsWith('.position')) for (let i = 0; i < t.values.length; i++) t.values[i] *= k;
+    out[c.name] = cc;
+  }
+  return out;
 }
 
 // Material de placa: igual al toon, pero recorta lo que queda fuera de la caja de su pieza
@@ -281,7 +298,34 @@ export function buildHero(style, st) {
   for (const b of body.skeleton.bones) rest[b.name] = b.quaternion.clone();
   const restPos = {};
   for (const k in T.bonePos) restPos[k] = new THREE.Vector3(...T.bonePos[k]);
-  return { g, root, body, bones, rest, restPos, plateMat: plate, flashMats: [plate, trim, suit, boot, ...Object.values(armorMats)], mats, gunMount, clips: T.clips };
+  return { g, root, body, bones, rest, restPos, plateMat: plate, flashMats: [plate, trim, suit, boot, ...Object.values(armorMats)], mats, gunMount, ...makeMixer(root, T.clips) };
+}
+
+// Animaciones: una base (quieto / trotar / caminar / en el aire) que se mezcla suave al cambiar,
+// y otras de una sola vez (saltar, caer, morir). Los brazos los pone despues poseHero sobre el arma.
+const LOOPS = ['Idle_Loop', 'Jog_Fwd_Loop', 'Walk_Loop', 'Jump_Loop'];
+function makeMixer(root, clips) {
+  if (!clips || !clips.Idle_Loop) return { mixer: null };
+  const mixer = new THREE.AnimationMixer(root);
+  const act = {};
+  for (const n in clips) {
+    const a = mixer.clipAction(clips[n]);
+    if (!LOOPS.includes(n)) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
+    act[n] = a;
+  }
+  act.Idle_Loop.play();
+  return { mixer, act, cur: 'Idle_Loop' };
+}
+// cambia la animacion de base (con mezcla de 'fade' segundos)
+export function heroPlay(h, name, fade = 0.2, timeScale = 1) {
+  if (!h.mixer || !h.act[name]) return;
+  const a = h.act[name];
+  a.timeScale = timeScale;
+  if (h.cur === name) return;
+  const prev = h.act[h.cur];
+  a.reset().setEffectiveWeight(1).play();
+  if (prev) prev.crossFadeTo(a, fade, false);
+  h.cur = name;
 }
 
 // ---------- Pose por codigo (sin animaciones del pack) ----------
@@ -335,7 +379,8 @@ export function poseHero(h, o) {
     const bl = (a, b) => h.restPos[a].distanceTo(h.restPos[b]);
     h.len = { ual: bl('upperarm_l', 'lowerarm_l'), lal: bl('lowerarm_l', 'hand_l'), uar: bl('upperarm_r', 'lowerarm_r'), lar: bl('lowerarm_r', 'hand_r') };
   }
-  for (const n of POSED) h.bones[n].quaternion.copy(h.rest[n]);
+  if (h.mixer) h.mixer.update(o.dt || 0);
+  else for (const n of POSED) h.bones[n].quaternion.copy(h.rest[n]);
   h.g.updateMatrixWorld(true);
   h.root.getWorldScale(_a); h.sc = _a.x;
   // ejes del personaje en el mundo
@@ -352,7 +397,7 @@ export function poseHero(h, o) {
   sp.updateMatrixWorld(true);
   // piernas
   const m = o.moving || 0;
-  if (o.air) {
+  if (h.mixer) { /* las piernas las mueve la animacion */ } else if (o.air) {
     legPose(h, 'l', 0.55, 1.1); legPose(h, 'r', 0.2, 0.7);
   } else {
     const w = o.walk || 0;
@@ -360,7 +405,7 @@ export function poseHero(h, o) {
     legPose(h, 'r', -Math.sin(w) * 0.55 * m, (0.12 + 0.7 * Math.max(0, -Math.cos(w))) * m);
   }
   // brazos al arma
-  if (o.gun) {
+  if (o.gun && !o.noGun) {
     o.gun.updateMatrixWorld(true);
     o.gun.localToWorld(_grip.copy(o.grip));
     o.gun.localToWorld(_sup.copy(o.support));
