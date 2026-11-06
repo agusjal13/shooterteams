@@ -302,7 +302,7 @@ function backToMenu(step) {
   pred.ok = false;
   touchShoot = mouseShoot = false;
   fireId = null; joy.id = null; look.id = null; gHold.id = null; gHold.open = false;
-  setRank(false); blindMs = 0;
+  setRank(false); blindMs = 0; clearSplats();
   document.querySelectorAll('.modal').forEach((m) => m.classList.remove('open'));
   if (document.pointerLockElement) document.exitPointerLock();
   document.body.classList.remove('playing');
@@ -725,6 +725,7 @@ socket.on('state', (s) => {
   if (s.m && s.m.mp && s.m.mp !== MAP.id) {
     MAP.setMap(s.m.mp);
     world.build(MAP);
+    clearSplats();
     pred.ok = false;
     for (const id in disp) disp[id].buf = [];
   }
@@ -1471,6 +1472,77 @@ function getGrenade(kind, i) {
   if (!pool[i]) pool[i] = makeGrenadeModel(kind);
   return pool[i];
 }
+
+// ---------- Manchas de pintura donde pegan los tiros ----------
+// El servidor avisa cada impacto en paredes, objetos o piso; queda una mancha del color del equipo
+// (como una bombucha con pintura). Se guardan las ultimas MAX_SPLATS y las mas viejas se reciclan.
+const MAX_SPLATS = 260;
+const splatList = [];
+const splatGeo = new THREE.PlaneGeometry(1, 1);
+const splatMats = { 0: [], 1: [] };
+function splatTexture(hex, seed) {
+  const s = 128, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  const g = cv.getContext('2d');
+  let r = seed * 9301 + 49297;
+  const rnd = () => ((r = (r * 9301 + 49297) % 233280) / 233280);
+  const c = new THREE.Color(hex);
+  const col = (k) => `rgb(${Math.round(c.r * 255 * k)},${Math.round(c.g * 255 * k)},${Math.round(c.b * 255 * k)})`;
+  g.fillStyle = col(1);
+  // mancha central irregular
+  g.beginPath();
+  const n = 14;
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2, rad = 24 + rnd() * 14;
+    const x = s / 2 + Math.cos(a) * rad, y = s / 2 + Math.sin(a) * rad;
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  }
+  g.closePath(); g.fill();
+  // salpicaduras alrededor con "colitas" hacia afuera
+  for (let i = 0; i < 9; i++) {
+    const a = rnd() * Math.PI * 2, d = 34 + rnd() * 24, rr = 3 + rnd() * 7;
+    const x = s / 2 + Math.cos(a) * d, y = s / 2 + Math.sin(a) * d;
+    g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.fill();
+    g.lineWidth = rr * 0.9; g.strokeStyle = col(1);
+    g.beginPath(); g.moveTo(s / 2 + Math.cos(a) * 26, s / 2 + Math.sin(a) * 26); g.lineTo(x, y); g.stroke();
+  }
+  // brillo humedo
+  g.fillStyle = 'rgba(255,255,255,0.28)';
+  g.beginPath(); g.ellipse(s / 2 - 8, s / 2 - 9, 9, 5, -0.6, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+for (const team of [0, 1]) {
+  for (let i = 0; i < 4; i++) {
+    splatMats[team].push(new THREE.MeshLambertMaterial({
+      map: splatTexture(team ? TEAM_HEX.blue : TEAM_HEX.red, i + 1 + team * 7),
+      transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    }));
+  }
+}
+function addSplat([x, y, z, axis, dir, team]) {
+  let m;
+  if (splatList.length >= MAX_SPLATS) { m = splatList.shift(); m.rotation.set(0, 0, 0); }
+  else { m = new THREE.Mesh(splatGeo, splatMats[0][0]); m.renderOrder = 1; scene.add(m); }
+  const mats = splatMats[team ? 1 : 0];
+  m.material = mats[(Math.random() * mats.length) | 0];
+  const size = 24 + Math.random() * 18;
+  m.scale.set(size, size, 1);
+  const off = 0.8; // un poquito afuera de la superficie
+  // ejes del mapa (x, y, altura) → mundo 3D (x, altura, z)
+  if (axis === 0) { m.position.set(x + dir * off, z, y); m.rotation.y = dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
+  else if (axis === 1) { m.position.set(x, z, y + dir * off); m.rotation.y = dir > 0 ? 0 : Math.PI; }
+  else { m.position.set(x, z + dir * off, y); m.rotation.x = dir > 0 ? -Math.PI / 2 : Math.PI / 2; }
+  m.rotateZ(Math.random() * Math.PI * 2);
+  m.visible = true;
+  splatList.push(m);
+}
+function clearSplats() {
+  for (const m of splatList) scene.remove(m);
+  splatList.length = 0;
+}
+socket.on('splat', (list) => { if (myId) for (const s of list) addSplat(s); });
 
 const blasts = []; // explosiones visibles
 const drops = []; // gotitas / chispas que salen volando

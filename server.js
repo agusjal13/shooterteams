@@ -197,6 +197,23 @@ const solidAt = (x, y, z) => MAP.solidAt(x, y, z);
 // ¿p ve a q? (de ojos a pecho, teniendo en cuenta pisos y paredes)
 const canSee = (p, q) => MAP.los(p.x, p.y, (p.z || 0) + MAP.EYE_H, q.x, q.y, (q.z || 0) + CHEST);
 const resolve = (p) => MAP.resolve(p, P_R, DT);
+// Donde pego una bala: punto justo antes de la superficie y hacia donde mira esa cara.
+// Devuelve [x, y, z, eje (0 x, 1 y, 2 altura), sentido de la cara (+1/-1), equipo (0 rojo, 1 azul)]
+const blockedAt = (x, y, z) => x < 0 || y < 0 || x > MAP.W || y > MAP.H || z < 0 || solidAt(x, y, z);
+function splatAt(px, py, pz, b) {
+  if (b.z > 330) return null; // se fue por arriba (cielo o techo): no mancha
+  let lx = px, ly = py, lz = pz, hx = b.x, hy = b.y, hz = b.z;
+  for (let i = 0; i < 7; i++) { // se acerca a la superficie partiendo el tramo al medio
+    const mx = (lx + hx) / 2, my = (ly + hy) / 2, mz = (lz + hz) / 2;
+    if (blockedAt(mx, my, mz)) { hx = mx; hy = my; hz = mz; } else { lx = mx; ly = my; lz = mz; }
+  }
+  const sx = Math.sign(b.vx) || 1, sy = Math.sign(b.vy) || 1, sz = Math.sign(b.vz) || -1;
+  let axis, dir;
+  if (blockedAt(lx + sx * 2, ly, lz)) { axis = 0; dir = -sx; }
+  else if (blockedAt(lx, ly + sy * 2, lz)) { axis = 1; dir = -sy; }
+  else { axis = 2; dir = -sz; }
+  return [Math.round(lx), Math.round(ly), Math.round(Math.max(0, lz)), axis, dir, b.team === 'red' ? 0 : 1];
+}
 
 function humanCount(R) {
   let n = 0;
@@ -781,14 +798,18 @@ function tickRoom(R, now) {
   // Disparos (en sub-pasos para no atravesar nada).
   const STEPS = 3;
   const keep = [];
+  const splats = []; // manchas de pintura donde las balas pegan en paredes, objetos o el piso
   for (const b of R.bullets) {
     let dead = false;
     for (let s = 0; s < STEPS && !dead; s++) {
+      const px = b.x, py = b.y, pz = b.z;
       b.x += (b.vx * DT) / STEPS;
       b.y += (b.vy * DT) / STEPS;
       b.z += (b.vz * DT) / STEPS;
       if (b.x < 0 || b.y < 0 || b.x > MAP.W || b.y > MAP.H || b.z < 0 || b.z > 330 || solidAt(b.x, b.y, b.z)) {
         dead = true;
+        const sp = splatAt(px, py, pz, b);
+        if (sp) splats.push(sp);
         break;
       }
       for (const id in P) {
@@ -821,6 +842,7 @@ function tickRoom(R, now) {
     if (!dead && b.life > 0 && m.phase === 'playing') keep.push(b);
   }
   R.bullets = keep;
+  if (splats.length) emit(R, 'splat', splats);
   if (m.phase === 'playing') updateGrenades(R, now);
   else R.grenades = [];
 

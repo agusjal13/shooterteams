@@ -287,6 +287,16 @@ function drive(dest) {
   s.connect(dest);
   return g;
 }
+// Capa de explosion: golpe sub-grave, estallido saturado y retumbe que se va apagando.
+// size 1 = escopeta, ~2 = granada
+function blastLayer(v, pan, t, size = 1, rev = 0.45) {
+  const dest = out(0.9 * v, pan, rev);
+  const dd = drive(dest);
+  tone(dest, t, 0.45 * size, 'sine', 75, 28, 1, 0.002); // golpe que se siente en el pecho
+  tone(dest, t, 0.08, 'triangle', 180, 70, 0.5, 0.001);
+  noiseBurst(dd, t, 0.12 + 0.05 * size, 'highpass', 900, 400, 0.6, 0.9, 0.001); // estallido seco
+  noiseBurst(dd, t + 0.01, 0.7 * size, 'lowpass', 1800, 70, 0.7, 0.85, 0.004); // retumbe
+}
 // "chk-chk" de recargar la escopeta (solo la mia)
 function pump(t) {
   const p = out(0.32, 0, 0.08);
@@ -351,7 +361,10 @@ export function shot(weapon, dist = 0, pan = 0) {
   if (fn) {
     const t = ctx.currentTime;
     fn(SIZE[weapon] || SIZE[0], weapon === 2, v, pan, t, 0.94 + Math.random() * 0.12);
-    if (weapon === 2 && dist === 0) pump(t);
+    if (weapon === 2) {
+      blastLayer(v * 0.8, pan, t, 1);
+      if (dist === 0) pump(t);
+    }
     return;
   }
   if (weapon === 2) { shotgun(v, pan, dist === 0); return; }
@@ -380,6 +393,7 @@ function shotgun(v, pan, mine) {
   for (let i = 0; i < 7; i++) {
     bubble(dest, t + 0.1 + Math.random() * 0.55, 500 + Math.random() * 900, 0.1, 0.04 + Math.random() * 0.04);
   }
+  blastLayer(v * 0.8, pan, t, 1);
   if (mine) pump(t);
 }
 
@@ -410,7 +424,9 @@ export function boom(water, dist = 0, pan = 0) {
   const v = Math.max(fall(dist, 3200), dist < 4000 ? 0.04 : 0);
   if (v < 0.02) return;
   const t = ctx.currentTime;
-  const dest = out(0.95 * v, pan);
+  const dest = out(0.95 * v, pan, 0.25);
+  // explosion de verdad debajo de todo (mas grande en la bomba de fuego)
+  blastLayer(v, pan, t, water ? 1.7 : 2.3, 0.6);
   if (water) {
     noiseBurst(dest, t, 0.75, 'lowpass', 5000, 260, 0.7, 1, 0.01);
     tone(dest, t, 0.25, 'sine', 200, 70, 0.55);
