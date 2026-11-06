@@ -7,7 +7,8 @@ const MAP = require('./public/map.js');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+// Se revisa seguido si cada conexion sigue viva: si un celular se corta, su jugador se va en ~20 s (antes ~45 s)
+const io = new Server(server, { pingInterval: 10000, pingTimeout: 10000 });
 // no-cache: el navegador siempre pregunta si hay una version nueva (evita quedarse con archivos viejos)
 const noCache = { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') };
 app.use(express.static(path.join(__dirname, 'public'), noCache));
@@ -877,8 +878,48 @@ io.on('connection', (socket) => {
   socket.emit('rooms', publicRooms());
   socket.on('listRooms', () => socket.emit('rooms', publicRooms()));
 
+  // Cada pestaña del navegador manda su identificacion (cid). Si esa pestaña ya tenia un jugador
+  // (por ejemplo se corto la conexion o se recargo la pagina), se recupera en vez de crear uno duplicado.
+  function takeOver(R, cid, data) {
+    if (!cid) return false;
+    for (const rid in rooms) {
+      const Q = rooms[rid];
+      for (const id in Q.players) {
+        const old = Q.players[id];
+        if (old.isBot || old.cid !== cid || id === socket.id) continue;
+        const oldSock = io.sockets.sockets.get(id);
+        if (Q !== R) {
+          // estaba en otra sala: se lo saca de ahi
+          if (oldSock) oldSock.disconnect(true);
+          else { delete Q.players[id]; if (humanCount(Q) === 0) delete rooms[rid]; }
+          continue;
+        }
+        // misma sala: el jugador viejo pasa a esta conexion (conserva puntos, plata y armas)
+        if (oldSock) { oldSock.data.room = null; oldSock.leave(R.id); oldSock.disconnect(true); }
+        delete R.players[id];
+        old.id = socket.id;
+        old.input = { mx: 0, my: 0, a: old.input.a, p: 0, shoot: false, q: 0 };
+        old.lastJc = 0;
+        old.rtt = 0;
+        old.hist = [];
+        const nm = cleanName(data.name);
+        if (data.name && !nm.changed) old.name = nm.name;
+        R.players[socket.id] = old;
+        if (R.match.creator === id) R.match.creator = socket.id;
+        socket.data.room = R.id;
+        socket.join(R.id);
+        socket.emit('welcome', { id: socket.id, team: old.team, room: { c: R.id, pub: R.isPublic, name: R.name } });
+        emit(R, 'feed', `${old.name} volvió a conectarse`);
+        return true;
+      }
+    }
+    return false;
+  }
+
   function enterRoom(R, data, creating) {
     data = data || {};
+    const cid = typeof data.cid === 'string' ? data.cid.replace(/[^a-z0-9]/gi, '').slice(0, 32) : '';
+    if (takeOver(R, cid, data)) return;
     const clean = cleanName(data.name);
     const name = clean.name;
     if (clean.changed) socket.emit('notice', `🚫 Ese nombre no está permitido. Te pusimos "${name}".`);
@@ -890,6 +931,7 @@ io.on('connection', (socket) => {
     socket.data.room = R.id;
     socket.join(R.id);
     const p = newPlayer(socket.id, name, team, false, Number(data.style));
+    p.cid = cid;
     R.players[socket.id] = p;
     placeNewPlayer(R, p);
     if (creating) R.match.creator = socket.id;

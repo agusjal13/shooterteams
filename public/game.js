@@ -24,6 +24,16 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 
 let myId = null;
 let joinData = null;
+// Identificacion de esta pestaña (sobrevive a recargar la pagina): si se corta la conexion,
+// el servidor nos devuelve nuestro jugador en vez de dejar uno viejo congelado
+const clientId = (() => {
+  const nuevo = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+  try {
+    let c = sessionStorage.getItem('rva_cid');
+    if (!c) { c = nuevo(); sessionStorage.setItem('rva_cid', c); }
+    return c;
+  } catch (e) { return nuevo(); }
+})();
 let state = null;
 let stateAt = 0;
 const disp = {}; // posiciones suavizadas por jugador
@@ -256,7 +266,7 @@ function enterGame() {
     localStorage.setItem('rva_mode', menuMode);
     localStorage.setItem('rva_mins', menuMins);
   } catch (e) {}
-  const base = { name, team: chosenTeam, style: chosenStyle };
+  const base = { name, team: chosenTeam, style: chosenStyle, cid: clientId };
   if (roomAction.type === 'create') {
     socket.emit('createRoom', { ...base, public: roomAction.pub, mode: menuMode, minutes: menuMins, map: menuMap });
   } else {
@@ -558,6 +568,7 @@ socket.on('state', (s) => {
   }
   const mine = s.p.find((p) => p.id === myId);
   if (mine) reconcile(mine, s);
+  showPing(mine && mine.pg);
   renderShop(false);
   if (botsPanel.classList.contains('open')) syncMatchPanel();
   if (!myId && performance.now() - lobbyAt > 500) { lobbyAt = performance.now(); refreshLobby(); }
@@ -1434,13 +1445,17 @@ function drawMinimap(meP) {
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 1;
   ctx.strokeRect(x0, y0, mw, mh);
-  // demora de la conexion (verde: buena, amarilla: aceptable, roja: alta)
-  if (meP && meP.pg) {
-    ctx.font = 'bold 11px system-ui, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = meP.pg < 120 ? '#5ee07a' : meP.pg < 220 ? '#f2c94c' : '#ff6b6b';
-    ctx.fillText(`${meP.pg} ms`, x0 + mw - 4, y0 + mh - 5);
-  }
+}
+
+// Ping: etiqueta arriba de los botones (verde: bueno, amarillo: aceptable, rojo: alto)
+const pingTag = document.getElementById('pingTag');
+let pingShown = -1;
+function showPing(pg) {
+  pg = pg || 0;
+  if (pg === pingShown) return;
+  pingShown = pg;
+  pingTag.textContent = `📶 Ping ${pg ? pg + ' ms' : '…'}`;
+  pingTag.style.color = !pg ? '#9aa4b2' : pg < 60 ? '#5ee07a' : pg < 120 ? '#f2c94c' : '#ff6b6b';
 }
 
 function drawCrosshair(meP) {
