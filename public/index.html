@@ -214,6 +214,20 @@
       background: rgba(0,0,0,.5); padding: 10px;
     }
     .modal.open { display: flex; }
+    #help { z-index: 40; }
+    .helpTabs { display: flex; gap: 6px; margin-bottom: 8px; }
+    .helpTabs button { flex: 1; }
+    .helpTabs button.on { background: #2a2614 !important; border-color: #f2c94c !important; }
+    .helpBody { display: none; }
+    .helpBody.on { display: block; }
+    .keys { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .keys td { padding: 6px 6px; border-top: 1px solid rgba(255,255,255,.08); vertical-align: top; }
+    .keys td:first-child { white-space: nowrap; color: #f2c94c; font-weight: 600; width: 1%; }
+    kbd { display: inline-block; min-width: 22px; text-align: center; padding: 2px 6px; margin: 0 2px; border-radius: 5px;
+      background: #2b313c; border: 1px solid #4a5260; border-bottom-width: 3px; font: 700 12px system-ui, sans-serif; color: #fff; }
+    .helpList { margin: 4px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.45; }
+    .helpList li { margin-bottom: 4px; }
+    #menuTop button.helpBtn { background: rgba(120,90,10,.6); border-color: #f2c94c; }
     .sheet {
       width: 100%; max-width: 640px; max-height: 100%; overflow-y: auto; touch-action: pan-y;
       background: rgba(16,20,28,.97); border: 1px solid rgba(255,255,255,.2); border-radius: 16px; padding: 12px 14px;
@@ -277,6 +291,7 @@
 
   <div class="overlay" id="menu">
     <div id="menuTop">
+      <button class="helpBtn">❓ Cómo jugar</button>
       <button id="updBtn">🔄 Actualizar</button>
       <button class="sndBtn" id="sndMenu">🔊 Sonido</button>
     </div>
@@ -356,6 +371,7 @@
       <button id="matchBtn">⚙️ Partida</button>
       <button id="botsBtn">🤖 Bots</button>
       <button class="sndBtn">🔊 Sonido</button>
+      <button class="helpBtn">❓ Cómo jugar</button>
       <button id="exitBtn">🚪 Salir</button>
     </div>
   </div>
@@ -364,6 +380,53 @@
   <div id="rank"></div>
   <!-- Pantalla blanca del flashbang -->
   <div id="flashOv"></div>
+
+  <!-- Como jugar: controles de PC y celular y lo basico del juego -->
+  <div class="modal" id="help">
+    <div class="sheet" style="max-width:720px">
+      <div class="head"><h2>❓ Cómo jugar</h2><button class="close" data-close>✕</button></div>
+      <div class="helpTabs">
+        <button data-ht="pc">💻 PC</button>
+        <button data-ht="cel">📱 Celular</button>
+      </div>
+      <div class="helpBody" data-hb="pc">
+        <table class="keys">
+          <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Moverse</td></tr>
+          <tr><td>Mouse</td><td>Apuntar (primero hacé click en la pantalla para capturar el mouse)</td></tr>
+          <tr><td>Click izquierdo o <kbd>F</kbd></td><td>Disparar</td></tr>
+          <tr><td><kbd>Espacio</kbd></td><td>Saltar</td></tr>
+          <tr><td><kbd>G</kbd></td><td>Tirar granada (🔥 bomba de fuego si sos Rojo, 💦 bombucha si sos Azul)</td></tr>
+          <tr><td><kbd>H</kbd></td><td>Tirar flash ⚡</td></tr>
+          <tr><td><kbd>B</kbd></td><td>Abrir / cerrar la tienda</td></tr>
+          <tr><td><kbd>Tab</kbd> (mantener)</td><td>Ver el ranking de la partida</td></tr>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Girar sin mouse</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Soltar el mouse (para usar los botones)</td></tr>
+        </table>
+      </div>
+      <div class="helpBody" data-hb="cel">
+        <table class="keys">
+          <tr><td>🕹️ Lado izquierdo</td><td>Apoyá el dedo en cualquier lugar de la mitad izquierda y arrastrá para moverte</td></tr>
+          <tr><td>👆 Lado derecho</td><td>Arrastrá el dedo para apuntar</td></tr>
+          <tr><td>🎯 Botón grande</td><td>Disparar. Mientras lo mantenés podés arrastrarlo para seguir apuntando</td></tr>
+          <tr><td>⬆️ Botón flecha</td><td>Saltar</td></tr>
+          <tr><td>🔥/💦 Botón chico</td><td>Un toque tira la granada (o el flash si lo elegiste)</td></tr>
+          <tr><td>Mantener 🔥/💦</td><td>Aparecen arriba la granada y el ⚡ flash: deslizá hasta uno y soltá para elegirlo. Después lo tirás con un toque</td></tr>
+          <tr><td>🛒 Tienda</td><td>Comprar armas, granadas y flashes</td></tr>
+          <tr><td>🏆 (mantener)</td><td>Ver el ranking; al soltar se cierra</td></tr>
+          <tr><td>☰</td><td>Partida, bots, sonido, cómo jugar y salir</td></tr>
+        </table>
+      </div>
+      <h3 style="margin-top:12px">Lo básico</h3>
+      <ul class="helpList">
+        <li><b>Rojo vs Azul:</b> gana el equipo con más bajas (DeathMatch) o el que gana más rondas (Guerra: si te eliminan, esperás a la próxima ronda).</li>
+        <li><b>Plata:</b> ganás monedas con cada baja (más a la cabeza). <b>A la cabeza</b> es muerte directa 🎯.</li>
+        <li><b>Tienda:</b> se compra solo <b>en tu base</b> (la zona de tu color). Las armas que ya tenés las podés equipar en cualquier lado.</li>
+        <li><b>Granada:</b> hace más daño cuanto más cerca del centro explota. No lastima a tu equipo. Para tirarla lejos, apuntá hacia arriba.</li>
+        <li><b>⚡ Flash:</b> no lastima pero deja ciego a <b>todos</b> los que lo miran, ¡también a tu equipo y a vos! Date vuelta antes de que explote.</li>
+        <li>Detrás de las paredes y objetos estás cubierto de los tiros y de las explosiones.</li>
+      </ul>
+    </div>
+  </div>
 
   <div class="modal" id="exitAsk">
     <div class="sheet" style="max-width:340px;text-align:center">

@@ -381,6 +381,17 @@ document.getElementById('exitYes').onclick = () => {
   backToMenu(0);
 };
 document.getElementById('shopBtn').onclick = () => openModal(shop);
+
+// Como jugar: arranca en la pestaña del dispositivo que se esta usando
+const helpEl = document.getElementById('help');
+function helpTab(t) {
+  helpEl.querySelectorAll('[data-ht]').forEach((b) => b.classList.toggle('on', b.dataset.ht === t));
+  helpEl.querySelectorAll('[data-hb]').forEach((b) => b.classList.toggle('on', b.dataset.hb === t));
+}
+helpEl.querySelectorAll('[data-ht]').forEach((b) => { b.onclick = () => { b.blur(); helpTab(b.dataset.ht); }; });
+document.querySelectorAll('.helpBtn').forEach((b) => {
+  b.onclick = () => { b.blur(); helpTab(isTouch ? 'cel' : 'pc'); openModal(helpEl); };
+});
 document.querySelectorAll('[data-close]').forEach((b) => {
   b.onclick = () => b.closest('.modal').classList.remove('open');
 });
