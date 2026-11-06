@@ -303,12 +303,23 @@ socket.on('joinError', (msg) => {
   backToMenu(0);
   roomErr.textContent = msg;
 });
-// Link de invitacion: ?sala=CODIGO entra directo a esa sala
+// Salas en las que ya estuvo este dispositivo (para no tratar su propio link como una invitacion nueva)
+const VISITED_KEY = 'rva_salas';
+function visitedRooms() {
+  try { return JSON.parse(localStorage.getItem(VISITED_KEY)) || []; } catch (e) { return []; }
+}
+function rememberRoom(code) {
+  try { localStorage.setItem(VISITED_KEY, JSON.stringify([code, ...visitedRooms().filter((c) => c !== code)].slice(0, 20))); } catch (e) {}
+}
+// Link de invitacion: ?sala=CODIGO va directo a poner el nombre para entrar a esa sala.
+// Si es una sala donde ya estuvimos (ej. se reabrio la app), se arranca en la pantalla de salas
+// con el codigo ya escrito.
 {
-  const code = new URLSearchParams(location.search).get('sala');
+  const code = (new URLSearchParams(location.search).get('sala') || '').toUpperCase();
   if (code) {
-    codeInput.value = code.toUpperCase();
-    roomAction = { type: 'join', code: code.toUpperCase() };
+    codeInput.value = code;
+    if (!visitedRooms().includes(code)) roomAction = { type: 'join', code };
+    try { history.replaceState(null, '', location.pathname); } catch (e) {} // que recargar no lo repita
   }
 }
 
@@ -523,8 +534,7 @@ socket.on('welcome', (d) => {
     joinData.team = d.team;
     if (myRoom) joinData.code = myRoom.c;
   }
-  // la direccion queda con el codigo: recargar vuelve a la misma sala y sirve para compartir
-  if (myRoom) try { history.replaceState(null, '', `${location.pathname}?sala=${myRoom.c}`); } catch (e) {}
+  if (myRoom) rememberRoom(myRoom.c);
   if (myRoom && !myRoom.pub) {
     notices.push({ msg: `🔒 Sala privada · código ${myRoom.c} · pasáselo a tus amigos`, at: performance.now() });
   }
